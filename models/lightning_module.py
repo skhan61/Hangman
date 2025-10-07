@@ -1,0 +1,133 @@
+"""PyTorch Lightning module wrapping Hangman architectures."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional
+
+import logging
+
+import torch
+import torch.nn.functional as F
+from lightning.pytorch import LightningModule
+
+from models.architectures import BaseArchitecture
+from models.metrics import MaskedAccuracy
+
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TrainingConfig:
+    learning_rate: float = 1e-3
+    weight_decay: float = 0.0
+
+
+class HangmanLightningModule(LightningModule):
+    def __init__(
+        self,
+        model: BaseArchitecture,
+        training_config: Optional[TrainingConfig] = None,
+    ) -> None:
+        super().__init__()
+        self.model = model
+        self.training_config = training_config or TrainingConfig()
+        self.train_accuracy = MaskedAccuracy()
+        self.val_accuracy = MaskedAccuracy()
+
+    def forward(self, inputs: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
+        return self.model(inputs, lengths)
+
+    def _compute_loss_and_metrics(self, batch):
+        inputs = batch["inputs"]
+        lengths = batch["lengths"]
+        labels = batch["labels"]
+        mask = batch["label_mask"]
+
+        logger.debug(
+            "Batch tensors — inputs=%s, lengths=%s, labels=%s, mask=%s",
+            tuple(inputs.shape),
+            tuple(lengths.shape),
+            tuple(labels.shape),
+            tuple(mask.shape),
+        )
+
+        logits = self(inputs, lengths)
+        log_probs = F.log_softmax(logits, dim=-1)
+
+        per_position_loss = -(labels * log_probs).sum(dim=-1)
+        masked_loss = per_position_loss * mask
+
+        total_mask = mask.sum()
+        loss = masked_loss.sum() / total_mask.clamp_min(1.0)
+
+        logger.debug(
+            "Loss stats — masked_loss_sum=%s, total_mask=%s, loss=%s",
+            masked_loss.sum().detach().cpu(),
+            total_mask.detach().cpu(),
+            loss.detach().cpu(),
+        )
+
+        with torch.no_grad():
+            preds = logits.argmax(dim=-1)
+            targets = labels.argmax(dim=-1)
+            correct = ((preds == targets).float() * mask).sum()
+            accuracy = correct / total_mask.clamp_min(1.0)
+
+        logger.debug(
+            "Accuracy stats — correct=%s, total_mask=%s, accuracy=%s",
+            correct.detach().cpu(),
+            total_mask.detach().cpu(),
+            accuracy.detach().cpu(),
+        )
+
+        return loss, accuracy, logits
+
+    def training_step(self, batch, batch_idx):
+        loss, batch_acc, logits = self._compute_loss_and_metrics(batch)
+        self.train_accuracy.update(logits, batch["labels"], batch["label_mask"])
+
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(
+            "train_acc",
+            self.train_accuracy,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "train_batch_acc", batch_acc, on_step=True, on_epoch=False, prog_bar=False
+        )
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss, batch_acc, logits = self._compute_loss_and_metrics(batch)
+        self.val_accuracy.update(logits, batch["labels"], batch["label_mask"])
+
+        self.log(
+            "val_loss",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=False,
+        )
+        self.log(
+            "val_acc",
+            self.val_accuracy,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=False,
+        )
+        self.log(
+            "val_batch_acc", batch_acc, on_step=False, on_epoch=True, prog_bar=False
+        )
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(
+            self.parameters(),
+            lr=self.training_config.learning_rate,
+            weight_decay=self.training_config.weight_decay,
+        )
