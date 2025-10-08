@@ -115,21 +115,26 @@ Hangman/
 │
 ├── api/                      # API & testing
 │   ├── hangman_api.py       ✅ Online API
-│   ├── offline_api.py       🚧 Local testing
-│   └── guess_strategies.py  ✅ Strategies
-│   └── test.py              🚧 Test scripts
+│   ├── offline_api.py       ✅ Local game simulation
+│   ├── guess_strategies.py  ✅ Pluggable strategies (frequency, BERT, neural)
+│   ├── test.py              ✅ Test scripts
+│   └── hangman_api_user.ipynb ✅ API usage examples
 │
 ├── simulation/
 │   └── data_generation.py   ✅ Generate training data
 │
 ├── hangman_callback/
-│   └── callback.py           ✅ Training callbacks
+│   ├── __init__.py           ✅ Module init
+│   └── callback.py           ✅ CustomHangmanEvalCallback for training evaluation
 │
 ├── data/
 │   ├── words_250000_train.txt ✅ Corpus
 │   └── dataset_250000words.parquet ✅ Preprocessed
 │
-└── train.py                  ✅ Training script
+├── train.py                  ✅ Training script (standalone)
+├── main.py                   ✅ Dataset preparation & eval testing
+├── 3-game_testing.ipynb     ✅ Game testing notebook
+└── checkpoints/              📁 Model checkpoints (local only, gitignored)
 ```
 
 ✅ = Complete
@@ -140,25 +145,25 @@ Hangman/
 
 ## What's Working
 
-1. **Data encoding pipeline**: Shared encoder ensures training/inference consistency
-2. **BiLSTM architecture**: Position-wise prediction `[batch, word_len, 26]`
-3. **Frequency baseline**: `FreqGuesser` class for comparison
-4. **Game engine**: Can simulate games word-by-word
-5. **Modular testing**: Same game engine works with freq baseline OR neural model
+1. **Data encoding pipeline**: Shared encoder ensures training/inference consistency ✅
+2. **BiLSTM architecture**: Position-wise prediction `[batch, word_len, 26]` ✅
+3. **Frequency baseline**: Strategy-based approach in `api/guess_strategies.py` ✅
+4. **Neural guess strategy**: `neural_guess_strategy()` uses trained model for predictions ✅
+5. **Offline API**: `HangmanOfflineAPI` for local game simulation ✅
+6. **Evaluation callback**: `CustomHangmanEvalCallback` for training-time evaluation ✅
+7. **Modular testing**: Pluggable strategies (frequency, BERT-style, neural) ✅
 
 ---
 
 ## What's Next
 
-1. **Train the BiLSTM model** on full dataset
-2. **Implement inference logic**:
-   - Get position-wise logits from model
-   - Aggregate across masked positions
-   - Select best letter to guess
-3. **Test against baseline**:
-   - Frequency baseline: ~65% win rate
-   - BiLSTM model: TBD
-4. **Offline API testing**: Complete `api/offline_api.py` for local testing
+1. **Train the BiLSTM model** on full dataset (ready to train)
+2. **Compare strategies**:
+   - Frequency baseline: TBD
+   - BERT-style baseline: TBD
+   - Neural BiLSTM: TBD (after training)
+3. **Optimize hyperparameters**: Learning rate, hidden dims, dropout, etc.
+4. **Deploy**: Create online API endpoint for trained model
 
 ---
 
@@ -201,22 +206,41 @@ My model:
 
 ## Running the Code
 
+### Prepare Dataset
+```bash
+python main.py
+```
+
 ### Train Model
 ```bash
-python train.py
+python train.py --train --max-epochs 10
 ```
 
-### Test Frequency Baseline
+### Test Evaluation Callback (Debug Mode)
 ```bash
-python api/test.py
+python main.py --debug --test-eval-only --eval-callback
 ```
 
-### Current Test Output
+This will:
+- Use the real BiLSTM model (untrained)
+- Test on 3 validation words
+- Show detailed game progress for each word
+- Display win rate and average tries remaining
+
+### Example Output
 ```
-Testing word: 'apple'
-...
-Result: WIN
-Tries remaining: 4/6
+INFO | hangman_callback.callback |
+Word: 'apple'
+INFO | hangman_callback.callback | Result: WIN
+INFO | hangman_callback.callback | Tries remaining: 3/6
+INFO | hangman_callback.callback | Game progress:
+INFO | hangman_callback.callback |   Guess 'e' ✓ -> ____e
+INFO | hangman_callback.callback |   Guess 'a' ✓ -> a___e
+INFO | hangman_callback.callback |   Guess 'p' ✓ -> app_e
+INFO | hangman_callback.callback |   Guess 'l' ✓ -> apple
+
+Win Rate: 100.00%
+Average Tries Remaining: 3.00
 ```
 
 ---

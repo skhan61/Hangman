@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make push-no-verify:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
