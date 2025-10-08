@@ -22,6 +22,8 @@ from dataset.data_module import HangmanDataModule, HangmanDataModuleConfig
 from models import (
     HangmanBiLSTM,
     HangmanBiLSTMConfig,
+    HangmanTransformer,
+    HangmanTransformerConfig,
     HangmanLightningModule,
     TrainingConfig,
 )
@@ -207,6 +209,21 @@ def parse_args() -> argparse.Namespace:
         default=-1,
         help="Number of testing words to sample (<=0 uses all available).",
     )
+    parser.add_argument(
+        "--test-eval-frequency",
+        type=int,
+        default=5,
+        help="Run the hangman testing callback every N training epochs.",
+    )
+    parser.add_argument(
+        "--model-arch",
+        "--model_arch",
+        dest="model_arch",
+        type=str,
+        choices=["bilstm", "transformer"],
+        default="bilstm",
+        help="Model architecture to use for Hangman training.",
+    )
     return parser.parse_args()
 
 
@@ -287,12 +304,27 @@ def main() -> None:
         tuple(batch["lengths"].shape),
     )
 
-    model_config = HangmanBiLSTMConfig(
-        vocab_size=len(batch["miss_chars"][0]), # 26
-        mask_idx=datamodule.dataset._mask_idx,
-        pad_idx=datamodule.dataset._pad_idx,
-    )
-    model = HangmanBiLSTM(model_config)
+    vocab_size = len(batch["miss_chars"][0])
+    mask_idx = datamodule.dataset._mask_idx
+    pad_idx = datamodule.dataset._pad_idx
+
+    if args.model_arch == "transformer":
+        model_config = HangmanTransformerConfig(
+            vocab_size=vocab_size,
+            mask_idx=mask_idx,
+            pad_idx=pad_idx,
+            max_word_length=batch["inputs"].size(1),
+        )
+        model = HangmanTransformer(model_config)
+        logger.info("Initialized HangmanTransformer with config: %s", model_config)
+    else:
+        model_config = HangmanBiLSTMConfig(
+            vocab_size=vocab_size,
+            mask_idx=mask_idx,
+            pad_idx=pad_idx,
+        )
+        model = HangmanBiLSTM(model_config)
+        logger.info("Initialized HangmanBiLSTM with config: %s", model_config)
 
     logits = model(batch["inputs"], batch["lengths"])
     logger.debug("Model output logits shape: %s", tuple(logits.shape))

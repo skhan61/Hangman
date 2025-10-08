@@ -16,7 +16,7 @@ from models.architectures.base import BaseArchitecture, BaseConfig
 class HangmanBiLSTMConfig(BaseConfig):
     embedding_dim: int = 256
     hidden_dim: int = 256
-    num_layers: int = 2
+    num_layers: int = 4
     dropout: float = 0.3
 
 
