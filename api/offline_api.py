@@ -248,6 +248,7 @@ def _aggregate_results(word_results: Sequence[Dict]) -> Dict:
             "average_tries_remaining": avg_tries_remaining,
             "win_rate": win_rate,
             "total_games": total_games,
+            "games": data["games"],
         }
 
     return {
@@ -259,6 +260,7 @@ def _aggregate_results(word_results: Sequence[Dict]) -> Dict:
             "win_rate": overall_win_rate,
             "average_tries_remaining": average_tries_remaining,
         },
+        "games": word_results,
     }
 
 

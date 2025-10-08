@@ -29,6 +29,7 @@ from simulation.data_generation import (
     generate_dataset_parquet,
     read_words_list,
 )
+from hangman_callback.callback import CustomHangmanEvalCallback
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +194,22 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Minimum change in monitored metric to qualify as improvement (requires --early-stopping).",
+    )
+    parser.add_argument(
+        "--eval-callback",
+        action="store_true",
+        help="Enable Hangman game evaluation callback during training.",
+    )
+    parser.add_argument(
+        "--eval-words",
+        type=int,
+        default=100,
+        help="Number of validation words to use for game evaluation (requires --eval-callback).",
+    )
+    parser.add_argument(
+        "--test-eval-only",
+        action="store_true",
+        help="Test evaluation callback only without training (requires --eval-callback).",
     )
     return parser.parse_args()
 

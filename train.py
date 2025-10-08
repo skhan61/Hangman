@@ -1,180 +1,409 @@
-# import torch
-# import numpy as np
-# import random
-# from supervised_learning._data.data_module import HangmanDataModule
-# from supervised_learning._model.components.neural_net import EmbeddingGRU
-# import os
+"""Central entry point for preparing Hangman datasets.
 
-# from src.utils import read_word_list
-# from src.data_generation.dataset_analysis import stratified_sample_from_categories, \
-#     classify_words_by_unique_letter_count, summarize_categories, categorize_words_by_length
-# import collections
+This script checks whether a parquet dataset already exists. If it does, the
+path is surfaced so downstream components (e.g. data modules) can reuse it. If
+not, it triggers dataset generation using the simulation utilities.
+"""
 
-# from lightning import Trainer
-# torch.set_float32_matmul_precision('medium') #  | 'high')
-# from supervised_learning._model.callback import SimulationCallback
-# from lightning.pytorch.callbacks import ModelCheckpoint
+from __future__ import annotations
 
-# from supervised_learning._model.hangman_model import HangmanModel
+import argparse
+import logging
+import sys
+import os
+from pathlib import Path
+from typing import Optional
 
-# from supervised_learning._model.simulation import play_a_game_with_a_word, \
-#                             simulate_games_for_word_list, guess # testing function
-# from lightning.pytorch.loggers import WandbLogger
-# import wandb
-# from supervised_learning._data.data_utils import encode_word, custom_collate_fn
-# from torch.utils.data import DataLoader, random_split
+import torch
+from lightning.pytorch import Trainer
+from lightning.pytorch.callbacks import ModelCheckpoint, TQDMProgressBar
 
-# def set_seed(seed):
-#     """Set seed for reproducibility."""
-#     random.seed(seed)       # Python random module
-#     np.random.seed(seed)    # Numpy module
-#     torch.manual_seed(seed) # PyTorch
-#     if torch.cuda.is_available():
-#         torch.cuda.manual_seed(seed)          # Sets seed for CUDA (GPU)
-#         torch.cuda.manual_seed_all(seed)      # Ensure reproducibility on all GPUs
-#         torch.backends.cudnn.deterministic = True  # Use deterministic algorithms
-#         torch.backends.cudnn.benchmark = False     # If input sizes do not vary, this should be set to False
+from dataset.data_module import HangmanDataModule, HangmanDataModuleConfig
+from models import (
+    HangmanBiLSTM,
+    HangmanBiLSTMConfig,
+    HangmanLightningModule,
+    TrainingConfig,
+)
+from simulation.data_generation import (
+    generate_dataset_parquet,
+    read_words_list,
+)
+from hangman_callback.callback import CustomHangmanEvalCallback
 
-# # Example usage: 
-# set_seed(42)  # Use any number to seed all libraries
-
-# corpus_path = '/media/sayem/510B93E12554BBD1/Hangman/data/words_250000_train.txt'
-# total_samples = 250_000  # This can be adjusted as needed
-# # Read a specified number of words from the corpus
-# corpus = read_word_list(corpus_path, num_samples=total_samples)
-# corpus_string = ''.join(corpus).lower()  # Join words and convert to lowercase
-# # Count the frequency of each character
-# counter = collections.Counter(corpus_string)
-# # Extract the frequency of letters a-z (assuming all letters appear at least once)
-# frequencies = np.array([counter.get(chr(i), 1) for i in range(97, 123)])  # Default to 1 to avoid division by zero
-
-# # Calculate inverse frequencies
-# inverse_frequencies = 1.0 / frequencies
-
-# # Normalize weights if necessary
-# max_freq = inverse_frequencies.max()
-# normalized_weights = torch.tensor(inverse_frequencies / max_freq, dtype=torch.float)
-# # print(normalized_weights.shape)
-
-# # dataset_dir = '/media/sayem/510B93E12554BBD1/dataset'
-# dataset_dir = '/media/sayem/510B93E12554BBD1/dataset'
-# config = {
-#     'data_dir': corpus_path,
-#     'batch_size': 512,
-#     'dataset_dir': dataset_dir,
-#     'vocab_size': 26,           # Example size of the vocabulary
-#     'min_length': 3,            # Example minimum length of words to be processed
-#     'max_epochs': 200,
-#     'drop_uniformly': False,
-#     'integer_indices': True, # False for one-hot encodi
-#     'num_workers': os.cpu_count(),
-#     'embedding_dim': 256,
-#     'hidden_dim': 1024, # rnn hidden dim
-#     'num_layers': 4, # number of rnn layers
-#     'dropout': 0.3, # dropout
-#     'miss_chars_fc_out_dim': 512,
-#     'nn_model': EmbeddingGRU,
-#     'pos_weight': normalized_weights,
-#     'optimizer_config': {
-#         'type': torch.optim.Adam,
-#         'params': {
-#             'lr': 0.0005,
-#             'betas': (0.9, 0.999),
-#             'eps': 1e-08,
-#             'weight_decay': 0.0,
-#             'amsgrad': False
-#         }
-#     },
-#     'scheduler_config': {
-#         'type': torch.optim.lr_scheduler.StepLR,
-#         'params': {
-#             'step_size': 1,
-#             'gamma': 0.1
-#         }
-#     }
-# }
-
-# # initialise the wandb logger and name your wandb project
-# wandb_logger = WandbLogger(name="hangman_run", project="hangman", config=config)
-
-# dm = HangmanDataModule(config)
-# dm.prepare_data()
-# dm.setup(stage='train')
-# dm.setup(stage='validate')
-
-            
-# model = HangmanModel(config)
-
-# corpus_path_ = '/media/sayem/510B93E12554BBD1/Hangman/data/20k.txt'
-# word_list = read_word_list(corpus_path_, num_samples=1_000)
-# simulation_callback = SimulationCallback(word_list=word_list)
+logger = logging.getLogger(__name__)
 
 
-# dirpath = "/media/sayem/510B93E12554BBD1/ckpt"
-# # Create the directory if it does not exist
-# if not os.path.exists(dirpath):
-#     os.makedirs(dirpath)
+def ensure_dataset(
+    *,
+    words_file: Path,
+    dataset_path: Optional[Path],
+    # max_words: Optional[int],
+    force: bool,
+    show_summary: bool,
+) -> Path:
+    """Guarantee a parquet dataset exists and return its path."""
 
-# # Configure the checkpoint callback
-# checkpoint_callback = ModelCheckpoint(
-#     dirpath="/media/sayem/510B93E12554BBD1/ckpt",  
-#     filename="{epoch}-{step}",  # Naming scheme
-#     save_top_k=-1,  # Save all checkpoints
-#     every_n_epochs=1  # Save every epoch
-# )
+    words = read_words_list(str(words_file))
+    # if max_words:
+    #     words = words[:max_words]
 
-# trainer = Trainer(max_epochs=config['max_epochs'], \
-#             logger=wandb_logger, \
-#             enable_checkpointing=True,
-#             reload_dataloaders_every_n_epochs=1,
-#             log_every_n_steps=10,
-#             callbacks=[simulation_callback, checkpoint_callback],)
-#             # limit_train_batches=0.1,  # 1% of training data
-#             # limit_val_batches=1,)    # 50% of validation data)
+    # Default location mirrors simulation script naming: dataset_<N>words.parquet
+    if dataset_path is None:
+        suffix = f"{len(words)}words"
+        dataset_path = words_file.parent / f"dataset_{suffix}.parquet"
 
-# trainer.fit(model, dm)
-# # trainer.validate(model, dm)
+    dataset_path = dataset_path.resolve()
 
-# wandb.finish()
+    if dataset_path.exists() and not force:
+        logger.info("Dataset found at %s. Skipping regeneration.", dataset_path)
+        return dataset_path
 
-# model = model.to('cpu')
-
-# final_results = simulate_games_for_word_list(word_list=word_list, guess_function=guess, \
-#                                             play_function=play_a_game_with_a_word, \
-#                                             model=model) 
-# # Print overall statistics
-# overall_stats = final_results['overall']
-# print("\nOverall Statistics:")
-# print(f"Total Games: {overall_stats['total_games']}, Wins: {overall_stats['wins']}, Losses: {overall_stats['losses']}")
-# print(f"Win Rate: {overall_stats['win_rate']:.2f}, Average_tries_remaining: {overall_stats['average_tries_remaining']:.2f}")
-
-# # from supervised_learning.data.data_utils import encode_word, custom_collate_fn
-# # from torch.utils.data import DataLoader, random_split
-
-# # train_dataset = dm.train_dataset
-# # val_dataset = dm.val_dataset
-
-# # for epoch in range(config['max_epochs']):
-# #     train_dataset.cur_epoch = epoch
-# #     val_dataset.cur_epoch = epoch
-
-# #     train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], 
-# #                             collate_fn=custom_collate_fn, shuffle=True, \
-# #                             num_workers=config['num_workers'])
-
-# #     val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], 
-# #                             collate_fn=custom_collate_fn, shuffle=False, \
-# #                             num_workers=config['num_workers'])
-
-# #     trainer = Trainer(max_epochs=1, \
-# #                 logger=False, \
-# #                 enable_checkpointing=False,
-# #                 # reload_dataloaders_every_n_epochs=1,
-# #                 callbacks=[simulation_callback],)
-# #                 # limit_train_batches=1,  # 1% of training data
-# #                 # limit_val_batches=1,)    # 50% of validation data)
-    
-# #     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+    logger.info("Creating dataset at %s...", dataset_path)
+    generate_dataset_parquet(
+        str(words_file),
+        dataset_path,
+        words=words,
+        force=True,
+        show_summary=show_summary,
+    )
+    return dataset_path
 
 
-pass
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Prepare hangman dataset")
+    parser.add_argument(
+        "--words-file",
+        type=Path,
+        default=Path("data/words_250000_train.txt"),
+        help="Text file containing newline-separated candidate words.",
+    )
+    parser.add_argument(
+        "--test-words-file",
+        type=Path,
+        default=Path("data/20k.txt"),
+        help="Text file containing words used for hangman game testing.",
+    )
+    parser.add_argument(
+        "--dataset-path",
+        type=Path,
+        default=None,
+        help="Destination parquet path. Defaults to data/dataset_<N>words.parquet.",
+    )
+
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Regenerate even if the parquet file already exists.",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging output.",
+    )
+    parser.add_argument(
+        "--train",
+        action="store_true",
+        help="Run a Lightning Trainer fit loop after dataset prep.",
+    )
+    parser.add_argument(
+        "--test-only",
+        action="store_true",
+        help="Skip training and only run the hangman testing callback.",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=256,
+        help="Batch size for the Lightning data module.",
+    )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=os.cpu_count() or 4,
+        help="Number of DataLoader worker processes.",
+    )
+    parser.add_argument(
+        "--train-val-split",
+        type=float,
+        default=0.9,
+        help="Fraction of dataset to use for training.",
+    )
+    parser.add_argument(
+        "--max-epochs",
+        type=int,
+        default=1,
+        help="Max epochs for the Trainer when --train is set.",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=1e-3,
+        help="Learning rate for optimizer when --train is set.",
+    )
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=0.0,
+        help="Weight decay for optimizer when --train is set.",
+    )
+    parser.add_argument(
+        "--progress-refresh",
+        type=int,
+        default=20,
+        help="TQDM progress bar refresh rate in steps (smaller = more frequent updates).",
+    )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="INFO",
+        help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL, NONE).",
+    )
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=Path,
+        default=Path("logs/checkpoints"),
+        help="Directory to store model checkpoints when training.",
+    )
+    parser.add_argument(
+        "--save-top-k",
+        type=int,
+        default=1,
+        help="Number of best checkpoints to keep (<=0 disables saving).",
+    )
+    parser.add_argument(
+        "--monitor-metric",
+        type=str,
+        default="val_acc",
+        help="Metric name to monitor for checkpoint selection.",
+    )
+    parser.add_argument(
+        "--monitor-mode",
+        type=str,
+        choices=["min", "max"],
+        default="max",
+        help="Whether the monitored metric should be minimized or maximized.",
+    )
+    parser.add_argument(
+        "--early-stopping",
+        action="store_true",
+        help="Enable early stopping based on hangman win rate.",
+    )
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=3,
+        help="Number of testing evaluations with no improvement before stopping (requires --early-stopping).",
+    )
+    parser.add_argument(
+        "--min-delta",
+        type=float,
+        default=0.0,
+        help="Minimum change in hangman win rate to qualify as improvement (requires --early-stopping).",
+    )
+    parser.add_argument(
+        "--test-word-limit",
+        type=int,
+        default=-1,
+        help="Number of testing words to sample (<=0 uses all available).",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    if args.log_level.upper() == "NONE":
+        logging.disable(logging.CRITICAL)
+    else:
+        level = (
+            logging.DEBUG
+            if args.debug
+            else getattr(logging, args.log_level.upper(), logging.INFO)
+        )
+        logging.basicConfig(
+            level=level,
+            format="%(levelname)s | %(name)s | %(message)s",
+            force=True,
+        )
+        logger.setLevel(level)
+
+    if args.train:
+        try:
+            sys.stdout.reconfigure(line_buffering=True)
+        except AttributeError:
+            pass
+
+    dataset_path = ensure_dataset(
+        words_file=args.words_file,
+        dataset_path=args.dataset_path,
+        # max_words=args.max_words,
+        force=args.force,
+        show_summary=args.debug,
+    )
+
+    datamodule_config = HangmanDataModuleConfig(
+        parquet_path=dataset_path,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        train_val_split=args.train_val_split,
+    )
+
+    datamodule = HangmanDataModule(datamodule_config)
+    datamodule.setup()
+
+    def tensor_repr(t: torch.Tensor):
+        if t.ndim <= 2:
+            return t.detach().cpu().numpy()
+        return "<omitted>"
+
+    first_sample = datamodule.train_dataset[0]
+    logger.debug("Sample from dataset before batching:")
+    for key, tensor in first_sample.items():
+        logger.debug(
+            "  %s: shape=%s, dtype=%s, repr=%s",
+            key,
+            tuple(tensor.shape),
+            tensor.dtype,
+            tensor_repr(tensor),
+        )
+
+    train_loader = datamodule.train_dataloader()
+    eval_loader = datamodule.val_dataloader()
+    logger.debug("len(train_loader) = %s batches", len(train_loader))
+    logger.debug("len(eval_loader) = %s batches", len(eval_loader))
+
+    batch = next(iter(train_loader))
+    logger.debug("Dataset ready at %s.", dataset_path)
+    logger.debug(
+        (
+            "First batch tensor shapes — inputs: %s, labels: %s, label_mask: %s, "
+            "miss_chars: %s, lengths: %s"
+        ),
+        tuple(batch["inputs"].shape),
+        tuple(batch["labels"].shape),
+        tuple(batch["label_mask"].shape),
+        tuple(batch["miss_chars"].shape),
+        tuple(batch["lengths"].shape),
+    )
+
+    model_config = HangmanBiLSTMConfig(
+        vocab_size=len(batch["miss_chars"][0]), # 26
+        mask_idx=datamodule.dataset._mask_idx,
+        pad_idx=datamodule.dataset._pad_idx,
+    )
+    model = HangmanBiLSTM(model_config)
+
+    logits = model(batch["inputs"], batch["lengths"])
+    logger.debug("Model output logits shape: %s", tuple(logits.shape))
+
+    lightning_module = HangmanLightningModule(
+        model,
+        TrainingConfig(
+            learning_rate=args.learning_rate,
+            weight_decay=args.weight_decay,
+        ),
+    )
+
+    logger.info("Testing evaluation callback with untrained model...")
+
+    if args.debug:
+        test_word_limit = 3
+    elif args.test_word_limit > 0:
+        test_word_limit = args.test_word_limit
+    else:
+        test_word_limit = 1_000
+
+    test_words_path: Path = (
+        args.test_words_file if args.test_words_file is not None else args.words_file
+    )
+    logger.info("Loading testing words from: %s", test_words_path)
+
+    evaluation_callback = CustomHangmanEvalCallback(
+        val_words_path=str(test_words_path),
+        dictionary_path=str(args.words_file),
+        max_words=test_word_limit,
+        verbose=args.debug,
+        parallel=not args.debug,
+        patience=args.patience if args.early_stopping else 0,
+        min_delta=args.min_delta,
+        mode=args.monitor_mode,
+        frequency=5,
+    )
+
+    # if not args.train:
+    trainer_kwargs = {
+        "max_epochs": args.max_epochs,
+        "logger": False,
+        "enable_checkpointing": args.save_top_k != 0,
+        "log_every_n_steps": 1,
+        "enable_progress_bar": True,
+    }
+
+    # refresh_rate = args.progress_refresh
+
+    if args.debug:
+        trainer_kwargs.update(
+            {
+                "limit_train_batches": 1,
+                "limit_val_batches": 1,
+                "num_sanity_val_steps": 0,
+            }
+        )
+        refresh_rate = 1
+
+    callbacks = [
+        # TQDMProgressBar(refresh_rate=refresh_rate),
+        evaluation_callback,
+    ]
+    # logger.info(
+    #     "Added Hangman testing callback with %d words and frequency=%d",
+    #     len(evaluation_callback.val_word_list),
+    #     max(1, args.test_eval_frequency),
+    # )
+
+    # if args.save_top_k != 0:
+    #     checkpoint_dir = args.checkpoint_dir.resolve()
+    #     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+        # monitor_metric = args.monitor_metric
+        # callbacks.append(
+        #     ModelCheckpoint(
+        #         dirpath=checkpoint_dir,
+        #         filename="epoch{epoch:03d}-{metric:.4f}".replace(
+        #             "metric", monitor_metric
+        #         ),
+        #         monitor=monitor_metric,
+        #         mode=args.monitor_mode,
+        #         save_top_k=args.save_top_k,
+        #         save_last=True,
+        #     )
+        # )
+
+    logger.debug("Trainer configuration: %s", trainer_kwargs)
+
+    trainer = Trainer(callbacks=callbacks, **trainer_kwargs)
+
+    # if datamodule.val_dataset is None or len(datamodule.val_dataset) == 0:
+    #     logger.warning(
+    #         "Validation dataset is empty; skipping pre-training validation."
+    #     )
+    # else:
+    logger.info("Running pre-training validation...")
+    trainer.validate(lightning_module, datamodule=datamodule)
+    # summary = evaluation_callback.latest_results or {
+    #     "win_rate": 0.0,
+    #     "average_tries_remaining": 0.0,
+    # }
+    # print_results(summary)
+
+    # if args.test_only:
+    #     return
+
+    logger.info("Starting training for %s epochs", args.max_epochs)
+    trainer.fit(lightning_module, datamodule=datamodule)
+    logger.info("Training complete")
+
+
+if __name__ == "__main__":
+    main()

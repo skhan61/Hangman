@@ -1,4 +1,4 @@
-from .feature_extractor import HangmanFeaturesExtractor
+# from .feature_extractor import HangmanFeaturesExtractor
 # from .classifier import BinaryRelevanceClassifier, LabelEmbeddingNN
 # from .hangman_model import HangmanModel
 # from .metric import NDCG, MAP

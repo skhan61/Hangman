@@ -144,9 +144,73 @@ def bert_style_guess_strategy(
     )
 
 
+def neural_guess_strategy(
+    masked_state: str, context: HangmanStrategyContext, model=None
+) -> str:
+    """Neural network-based guess strategy using trained model.
+
+    Args:
+        masked_state: Current word state, e.g., "_ p p _ e "
+        context: Strategy context with dictionary and guessed letters
+        model: Trained PyTorch model (required)
+
+    Raises:
+        ValueError: If model is None
+    """
+    import torch
+    from dataset.observation_builder import build_model_inputs
+
+    if model is None:
+        raise ValueError("Neural strategy requires a trained model")
+
+    # Build model inputs from masked state
+    masked_word = masked_state.replace(" ", "")
+    # state_tensor, length_tensor = build_model_inputs(masked_word)
+
+    # # Get model predictions [1, word_len, 26]
+    # model.eval()
+    # with torch.no_grad():
+    #     logits = model(state_tensor, length_tensor)
+    #     # print(logits.shape)
+
+    state_tensor, length_tensor = build_model_inputs(masked_word)
+    device = next(model.parameters()).device
+    state_tensor = state_tensor.to(device)
+    length_tensor = length_tensor.to(device)
+    model.eval()
+    with torch.no_grad():
+        logits = model(state_tensor, length_tensor)
+
+    # Find masked positions
+    masked_positions = [i for i, c in enumerate(masked_word) if c == "_"]
+
+    # Aggregate logits across masked positions: [26]
+    aggregated_logits = logits[0, masked_positions, :].sum(dim=0)
+
+    # print(aggregated_logits.shape)
+    # Get sorted letter indices by score
+    sorted_indices = torch.argsort(aggregated_logits, descending=True)
+
+    # Find first unguessed letter
+    guessed_set = set(context.guessed_letters)
+    for idx in sorted_indices:
+        letter = chr(ord("a") + idx.item())
+        if letter not in guessed_set:
+            logger.debug(
+                "Neural strategy: predicted '%s' for state '%s' (score=%.3f)",
+                letter,
+                masked_state,
+                aggregated_logits[idx].item(),
+            )
+            return letter
+
+    raise RuntimeError(f"All letters guessed for state '{masked_state}'")
+
+
 __all__ = [
     "GuessStrategy",
     "HangmanStrategyContext",
     "frequency_guess_strategy",
     "bert_style_guess_strategy",
+    "neural_guess_strategy",
 ]
