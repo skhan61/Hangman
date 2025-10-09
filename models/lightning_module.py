@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class TrainingConfig:
+class TrainingModuleConfig:
     learning_rate: float = 1e-3
     weight_decay: float = 0.0
 
@@ -28,18 +28,20 @@ class HangmanLightningModule(LightningModule):
     def __init__(
         self,
         model: BaseArchitecture,
-        training_config: Optional[TrainingConfig] = None,
+        training_config: Optional[TrainingModuleConfig] = None,
     ) -> None:
         super().__init__()
         self.model = model
-        self.training_config = training_config or TrainingConfig()
+        self.model = self.model.to(self.device)
+        self.training_config = training_config or TrainingModuleConfig()
         self.train_accuracy = MaskedAccuracy()
-        self.val_accuracy = MaskedAccuracy()
+        # self.val_accuracy = MaskedAccuracy()
 
     def forward(self, inputs: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
         return self.model(inputs, lengths)
 
     def _compute_loss_and_metrics(self, batch):
+        # Batch tensors should already be on the correct device
         inputs = batch["inputs"]
         lengths = batch["lengths"]
         labels = batch["labels"]
@@ -85,8 +87,19 @@ class HangmanLightningModule(LightningModule):
         return loss, accuracy, logits
 
     def training_step(self, batch, batch_idx):
-        loss, batch_acc, logits = self._compute_loss_and_metrics(batch)
-        self.train_accuracy.update(logits, batch["labels"], batch["label_mask"])
+        # Move batch to device first
+        device = self.device
+        # print(device)
+        batch_device = {
+            "inputs": batch["inputs"].to(device),
+            "labels": batch["labels"].to(device),
+            "label_mask": batch["label_mask"].to(device),
+            "lengths": batch["lengths"].to(device),
+            # "words": batch["words"],
+        }
+
+        loss, batch_acc, logits = self._compute_loss_and_metrics(batch_device)
+        self.train_accuracy.update(logits, batch_device["labels"], batch_device["label_mask"])
 
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log(
@@ -100,30 +113,6 @@ class HangmanLightningModule(LightningModule):
             "train_batch_acc", batch_acc, on_step=True, on_epoch=False, prog_bar=False
         )
         return loss
-
-    def validation_step(self, batch, batch_idx):
-        loss, batch_acc, logits = self._compute_loss_and_metrics(batch)
-        self.val_accuracy.update(logits, batch["labels"], batch["label_mask"])
-
-        self.log(
-            "val_loss",
-            loss,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-            sync_dist=False,
-        )
-        self.log(
-            "val_acc",
-            self.val_accuracy,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-            sync_dist=False,
-        )
-        self.log(
-            "val_batch_acc", batch_acc, on_step=False, on_epoch=True, prog_bar=False
-        )
 
     def configure_optimizers(self):
         return torch.optim.Adam(

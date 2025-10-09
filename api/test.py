@@ -69,12 +69,7 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         default=True,
         help="Run simulations in parallel (default).",
     )
-    parser.add_argument(
-        "--no-parallel",
-        dest="parallel",
-        action="store_false",
-        help="Disable parallel simulation.",
-    )
+
     parser.add_argument(
         "--max-workers",
         type=int,
@@ -91,7 +86,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     logging.basicConfig(level=log_level, format="%(levelname)s:%(name)s:%(message)s")
 
     repo_root = Path(__file__).resolve().parent.parent
-    words_path = repo_root / "data" / "20k.txt"
+    words_path = repo_root / "data" / "test_unique.txt"
 
     env_seed = os.getenv("HANGMAN_TEST_SEED") if args.seed is None else None
     seed_value = (
@@ -117,16 +112,20 @@ def main(argv: Iterable[str] | None = None) -> None:
     api = HangmanOfflineAPI(strategy=frequency_guess_strategy)  # bert_style_guess_strategy
 
     sample_word = words[0]
-    win, attempts_remaining, progress = api.play_a_game_with_a_word(sample_word)
-    log.debug(
+    win, attempts_remaining, progress \
+        = api.play_a_game_with_a_word(sample_word)
+    log.info(
         "Single word test -> word='%s', win=%s, attempts_remaining=%s",
         sample_word,
         win,
         attempts_remaining,
     )
+    log.debug("Game progress: %s", progress)
 
     summary = api.simulate_games_for_word_list(
-        words, parallel=args.parallel, max_workers=args.max_workers
+        words, 
+        parallel=args.parallel, 
+        max_workers=args.max_workers
     )
     log.info("Aggregate results: overall=%s", summary["overall"])
     for length, stats in sorted(summary["results_by_length"].items()):

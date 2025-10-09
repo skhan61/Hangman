@@ -16,99 +16,55 @@ from typing import Optional
 
 import torch
 from lightning.pytorch import Trainer
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, TQDMProgressBar
+from lightning.pytorch.callbacks import ModelCheckpoint, TQDMProgressBar
 
 from dataset.data_module import HangmanDataModule, HangmanDataModuleConfig
 from models import (
     HangmanBiLSTM,
     HangmanBiLSTMConfig,
+    HangmanTransformer,
+    HangmanTransformerConfig,
     HangmanLightningModule,
-    TrainingConfig,
+    TrainingModuleConfig,
 )
-from simulation.data_generation import (
-    generate_dataset_parquet,
-    read_words_list,
-)
+
+# from simulation.data_generation import (
+#     generate_dataset_and_save_parquet,
+#     read_words_list,
+# )
 from hangman_callback.callback import CustomHangmanEvalCallback
 
 logger = logging.getLogger(__name__)
 
 
-def ensure_dataset(
-    *,
-    words_file: Path,
-    dataset_path: Optional[Path],
-    max_words: Optional[int],
-    force: bool,
-    show_summary: bool,
-) -> Path:
-    """Guarantee a parquet dataset exists and return its path."""
-
-    words = read_words_list(str(words_file))
-    if max_words:
-        words = words[:max_words]
-
-    # Default location mirrors simulation script naming: dataset_<N>words.parquet
-    if dataset_path is None:
-        suffix = f"{len(words)}words"
-        dataset_path = words_file.parent / f"dataset_{suffix}.parquet"
-
-    dataset_path = dataset_path.resolve()
-
-    if dataset_path.exists() and not force:
-        logger.info("Dataset found at %s. Skipping regeneration.", dataset_path)
-        return dataset_path
-
-    logger.info("Creating dataset at %s...", dataset_path)
-    generate_dataset_parquet(
-        str(words_file),
-        dataset_path,
-        words=words,
-        force=True,
-        show_summary=show_summary,
-    )
-    return dataset_path
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prepare hangman dataset")
     parser.add_argument(
-        "--words-file",
+        "--words-file-path",
+        "--words-file_path",
+        dest="words_file_path",
         type=Path,
         default=Path("data/words_250000_train.txt"),
         help="Text file containing newline-separated candidate words.",
     )
     parser.add_argument(
-        "--dataset-path",
+        "--test-words-file-path",
+        "--test-words-file_path",
+        dest="test_words_file_path",
         type=Path,
-        default=None,
-        help="Destination parquet path. Defaults to data/dataset_<N>words.parquet.",
+        default=Path("data/test_unique.txt"),
+        help="Text file containing words used for hangman game testing.",
     )
-    parser.add_argument(
-        "--max-words",
-        type=int,
-        default=None,
-        help="Optional cap on number of words to include.",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Regenerate even if the parquet file already exists.",
-    )
+
     parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug logging output.",
     )
     parser.add_argument(
-        "--train",
-        action="store_true",
-        help="Run a Lightning Trainer fit loop after dataset prep.",
-    )
-    parser.add_argument(
         "--batch-size",
         type=int,
-        default=256,
+        default=4096,
         help="Batch size for the Lightning data module.",
     )
     parser.add_argument(
@@ -116,12 +72,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=os.cpu_count() or 4,
         help="Number of DataLoader worker processes.",
-    )
-    parser.add_argument(
-        "--train-val-split",
-        type=float,
-        default=0.9,
-        help="Fraction of dataset to use for training.",
     )
     parser.add_argument(
         "--max-epochs",
@@ -181,36 +131,66 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--early-stopping",
         action="store_true",
-        help="Enable early stopping on the monitored validation metric.",
+        help="Enable early stopping based on hangman win rate.",
     )
     parser.add_argument(
         "--patience",
         type=int,
         default=3,
-        help="Number of validation checks with no improvement before stopping (requires --early-stopping).",
+        help="Number of testing evaluations with no improvement before stopping (requires --early-stopping).",
     )
     parser.add_argument(
         "--min-delta",
         type=float,
         default=0.0,
-        help="Minimum change in monitored metric to qualify as improvement (requires --early-stopping).",
+        help="Minimum change in hangman win rate to qualify as improvement (requires --early-stopping).",
     )
     parser.add_argument(
-        "--eval-callback",
-        action="store_true",
-        help="Enable Hangman game evaluation callback during training.",
-    )
-    parser.add_argument(
-        "--eval-words",
+        "--test-word-limit",
         type=int,
-        default=100,
-        help="Number of validation words to use for game evaluation (requires --eval-callback).",
+        default=-1,
+        help="Number of testing words to sample (<=0 uses all available).",
     )
     parser.add_argument(
-        "--test-eval-only",
-        action="store_true",
-        help="Test evaluation callback only without training (requires --eval-callback).",
+        "--test-eval-frequency",
+        type=int,
+        default=5,
+        help="Run the hangman testing callback every N training epochs.",
     )
+    parser.add_argument(
+        "--model-arch",
+        "--model_arch",
+        dest="model_arch",
+        type=str,
+        choices=["bilstm", "transformer"],
+        default="bilstm",
+        help="Model architecture to use for Hangman training.",
+    )
+    parser.add_argument(
+        "--strategies",
+        type=str,
+        default="letter_based",
+        help=(
+            "Comma-separated list of masking strategies to use for data generation. "
+            "Options: letter_based, left_to_right, right_to_left, random_position, "
+            "vowels_first, frequency_based, center_outward, edges_first, alternating, "
+            "rare_letters_first, consonants_first, word_patterns, random_percentage. "
+            "Use 'all' to enable all 13 strategies. Default: letter_based"
+        ),
+    )
+    parser.add_argument(
+        "--row-group-cache-size",
+        type=int,
+        default=50,
+        help="Number of parquet row groups to cache in memory (higher = faster for large batches).",
+    )
+    parser.add_argument(
+        "--prefetch-factor",
+        type=int,
+        default=4,
+        help="Number of batches to prefetch per worker (higher = faster but more memory).",
+    )
+
     return parser.parse_args()
 
 
@@ -232,149 +212,191 @@ def main() -> None:
         )
         logger.setLevel(level)
 
-    if args.train:
-        try:
-            sys.stdout.reconfigure(line_buffering=True)
-        except AttributeError:
-            pass
+    # if args.train:
+    #     try:
+    # # sys.stdout.reconfigure(line_buffering=True)
+    #     except AttributeError:
+    #         pass
 
-    dataset_path = ensure_dataset(
-        words_file=args.words_file,
-        dataset_path=args.dataset_path,
-        max_words=args.max_words,
-        force=args.force,
-        show_summary=args.debug,
+    # Parse strategies from command line argument
+    # if args.strategies.lower() == 'all':
+    strategies = [
+        "letter_based",
+        # "left_to_right",
+        # "right_to_left",
+        # "random_position",
+        # "vowels_first",
+        # "frequency_based",
+        # "center_outward",
+        # "edges_first",
+        # "alternating",
+        # "rare_letters_first",
+        # "consonants_first",
+        # "word_patterns",
+        # "random_percentage",
+    ]
+    # else:
+    #     strategies = [s.strip() for s in args.strategies.split(',')]
+
+    logger.info("Using masking strategies: %s", strategies)
+
+    # dataset_path = ensure_dataset(
+    #     words_file=args.words_file,
+    #     dataset_path=args.dataset_path,
+    #     # max_words=args.max_words,
+    #     strategies=strategies,
+    #     force=args.force,
+    #     show_summary=args.debug,
+    # )
+
+    logger.info(
+        f"Preparing data module with batch size {args.batch_size}, num_workers {args.num_workers}"
     )
 
     datamodule_config = HangmanDataModuleConfig(
-        parquet_path=dataset_path,
+        words_path=args.words_file_path,
+        # eval_words_path=args.test_words_file_path,
+        strategies=strategies,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        train_val_split=args.train_val_split,
+        row_group_cache_size=args.row_group_cache_size,
+        prefetch_factor=args.prefetch_factor,
+        # train_val_split=args.train_val_split,
     )
 
     datamodule = HangmanDataModule(datamodule_config)
+    datamodule.prepare_data()
     datamodule.setup()
 
-    def tensor_repr(t: torch.Tensor):
-        if t.ndim <= 2:
-            return t.detach().cpu().numpy()
-        return "<omitted>"
-
-    first_sample = datamodule.train_dataset[0]
-    logger.debug("Sample from dataset before batching:")
-    for key, tensor in first_sample.items():
-        logger.debug(
-            "  %s: shape=%s, dtype=%s, repr=%s",
-            key,
-            tuple(tensor.shape),
-            tensor.dtype,
-            tensor_repr(tensor),
-        )
-
     train_loader = datamodule.train_dataloader()
-    eval_loader = datamodule.val_dataloader()
-    logger.debug("len(train_loader) = %s batches", len(train_loader))
-    logger.debug("len(eval_loader) = %s batches", len(eval_loader))
+
+    logger.debug("len(train_loader) = %s batches", (len(train_loader)))
+
+    # # eval_loader = datamodule.val_dataloader()
+    # logger.debug("len(train_loader) = %s batches", len(train_loader))
+    # # logger.debug("len(eval_loader) = %s batches", len(eval_loader))
 
     batch = next(iter(train_loader))
-    logger.debug("Dataset ready at %s.", dataset_path)
+    inputs_shape = tuple(batch["inputs"].shape)
+    labels_shape = tuple(batch["labels"].shape)
+    mask_shape = tuple(batch["label_mask"].shape)
+    lengths_shape = tuple(batch["lengths"].shape)
+    logger.debug(
+        f"First batch tensor shapes — inputs: {inputs_shape}, labels: {labels_shape}, label_mask: {mask_shape}, lengths: {lengths_shape}"
+    )
     logger.debug(
         (
             "First batch tensor shapes — inputs: %s, labels: %s, label_mask: %s, "
-            "miss_chars: %s, lengths: %s"
+            "lengths: %s"
         ),
         tuple(batch["inputs"].shape),
         tuple(batch["labels"].shape),
         tuple(batch["label_mask"].shape),
-        tuple(batch["miss_chars"].shape),
         tuple(batch["lengths"].shape),
     )
 
+    vocab_size = len(batch["labels"][0][0])
+    logger.debug(f"Vocab size: {vocab_size}")
+
+    # Get mask_idx and pad_idx from the dataset's encoder
+    from dataset.encoder_utils import DEFAULT_ALPHABET
+
+    mask_idx = len(DEFAULT_ALPHABET)
+    pad_idx = len(DEFAULT_ALPHABET) + 1
+
+    # if args.model_arch == "transformer":
+    #     model_config = HangmanTransformerConfig(
+    #         vocab_size=vocab_size,
+    #         mask_idx=mask_idx,
+    #         pad_idx=pad_idx,
+    #         max_word_length=45,  # Use hardcoded max length for all sequences
+    #     )
+    #     model = HangmanTransformer(model_config)
+    #     logger.info("Initialized HangmanTransformer with config: %s", model_config)
+    # else:
     model_config = HangmanBiLSTMConfig(
-        vocab_size=len(batch["miss_chars"][0]),
-        mask_idx=datamodule.dataset._mask_idx,
-        pad_idx=datamodule.dataset._pad_idx,
+        vocab_size=vocab_size,
+        mask_idx=mask_idx,
+        pad_idx=pad_idx,
     )
     model = HangmanBiLSTM(model_config)
+    logger.info("Initialized model with config: %s", model_config)
 
     logits = model(batch["inputs"], batch["lengths"])
     logger.debug("Model output logits shape: %s", tuple(logits.shape))
 
-    if args.train:
-        lightning_module = HangmanLightningModule(
-            model,
-            TrainingConfig(
-                learning_rate=args.learning_rate,
-                weight_decay=args.weight_decay,
-            ),
-        )
+    # from tqdm import tqdm
+    # for batch in tqdm(train_loader):
+    #     input = batch["inputs"].to('cuda')
+    #     lengths = batch["lengths"].to('cuda')
+    #     model = model.to('cuda')
+    #     logits = model(input, lengths)
+    #     logger.debug("Model output logits shape: %s", tuple(logits.shape))
+    #     # break  # Just process one batch for demonstration
 
-        trainer_kwargs = {
-            "max_epochs": args.max_epochs,
-            "logger": False,
-            "enable_checkpointing": args.save_top_k != 0,
-            "log_every_n_steps": 1,
-            "enable_progress_bar": True,
-        }
+    # model = model.to('cuda')
 
-        refresh_rate = args.progress_refresh
+    lightning_module = HangmanLightningModule(
+        model,
+        TrainingModuleConfig(
+            learning_rate=args.learning_rate,
+            weight_decay=args.weight_decay,
+        ),
+    )
 
-        if args.debug:
-            trainer_kwargs.update(
-                {
-                    "limit_train_batches": 1,
-                    "limit_val_batches": 1,
-                    "num_sanity_val_steps": 0,
-                }
-            )
-            refresh_rate = 1
 
-        callbacks = [TQDMProgressBar(refresh_rate=refresh_rate)]
+    evaluation_callback = CustomHangmanEvalCallback(
+        val_words_path=str(args.test_words_file_path),
+        dictionary_path=str(args.words_file_path),
+        max_words=1000,
+        verbose=args.debug,
+        parallel=not args.debug,
+        patience=args.patience if args.early_stopping else 0,
+        min_delta=args.min_delta,
+        mode=args.monitor_mode,
+        frequency=args.test_eval_frequency,
+    )
 
-        if args.save_top_k != 0:
-            checkpoint_dir = args.checkpoint_dir.resolve()
-            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    # logger.info("Running initial hangman evaluation before training...")
+    # eval_summary = evaluation_callback._run_evaluation(
+    #     lightning_module.model,
+    #     )
+    
+    # logger.info("Win rate: %.2f", eval_summary["win_rate"])
+    # logger.info("Average tries remaining: %.2f", \
+    #             eval_summary["average_tries_remaining"])
 
-            monitor_metric = args.monitor_metric
-            callbacks.append(
-                ModelCheckpoint(
-                    dirpath=checkpoint_dir,
-                    filename="epoch{epoch:03d}-{metric:.4f}".replace(
-                        "metric", monitor_metric
-                    ),
-                    monitor=monitor_metric,
-                    mode=args.monitor_mode,
-                    save_top_k=args.save_top_k,
-                    save_last=True,
-                )
-            )
+    trainer_kwargs = {
+        "max_epochs": args.max_epochs,
+        "logger": False,
+        "enable_checkpointing": False,  # Disable checkpointing to avoid issues
+        "log_every_n_steps": 1,
+        "enable_progress_bar": True,
+        "accelerator": "auto",
+        "num_sanity_val_steps": 0,  # Skip validation sanity checks
+    }
 
-        if args.early_stopping:
-            callbacks.append(
-                EarlyStopping(
-                    monitor=args.monitor_metric,
-                    patience=args.patience,
-                    min_delta=args.min_delta,
-                    mode=args.monitor_mode,
-                    verbose=True,
-                )
-            )
+    trainer = Trainer(**trainer_kwargs, callbacks=[evaluation_callback])
+    # trainer = Trainer(**trainer_kwargs) # , callbacks=[evaluation_callback])
 
-        logger.debug("Trainer configuration: %s", trainer_kwargs)
-
-        trainer = Trainer(callbacks=callbacks, **trainer_kwargs)
-        if datamodule.val_dataset is None or len(datamodule.val_dataset) == 0:
-            logger.warning(
-                "Validation dataset is empty; skipping pre-training validation."
-            )
-        else:
-            logger.info("Running pre-training validation...")
-            trainer.validate(lightning_module, datamodule=datamodule)
-
-        logger.info("Starting training for %s epochs", args.max_epochs)
-        trainer.fit(lightning_module, datamodule=datamodule)
+    logger.info("Starting training for %s epochs", args.max_epochs)
+    try:
+        trainer.fit(lightning_module, train_dataloaders=train_loader)
         logger.info("Training complete")
+    except Exception as e:
+        logger.error("Training failed with error: %s", e, exc_info=True)
+        raise
+
+    logger.info("Running initial hangman evaluation after training...")
+    eval_summary = evaluation_callback._run_evaluation(
+        lightning_module.model,
+        )
+    
+    logger.info("Win rate: %.2f", eval_summary["win_rate"])
+    logger.info("Average tries remaining: %.2f", \
+                eval_summary["average_tries_remaining"])
+
+
 
 
 if __name__ == "__main__":

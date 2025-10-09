@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 import logging
 
@@ -13,102 +13,243 @@ from lightning.pytorch import LightningDataModule
 from torch.utils.data import DataLoader, random_split
 
 from .hangman_dataset import (
-    DEFAULT_ALPHABET,
     HangmanDataset,
     HangmanDatasetConfig,
 )
+from .encoder_utils import DEFAULT_ALPHABET
+from .data_generation import read_words_list
 
+import os
 
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_WORDS_FILE = Path("data/words_250000_train.txt")
+
+DEFAULT_STRATEGIES = [
+    "letter_based",
+    "left_to_right",
+    "right_to_left",
+    "random_position",
+    "vowels_first",
+    "frequency_based",
+    "center_outward",
+    "edges_first",
+    "alternating",
+    "rare_letters_first",
+    "consonants_first",
+    "word_patterns",
+    "random_percentage",
+]
+DEFAULT_PARQUET_PATH = Path("data/dataset_227300words.parquet")
+from .data_generation import generate_full_dataset
+
+
 @dataclass
 class HangmanDataModuleConfig:
-    parquet_path: Path
-    batch_size: int = 256
-    num_workers: int = 4
-    train_val_split: float = 0.9
+    words_path: Path = DEFAULT_WORDS_FILE
+    # eval_words_path: Optional[Path] = (None,)
+    strategies: Sequence[str] = tuple(DEFAULT_STRATEGIES)
+    batch_size: int = 1024
+    num_workers: int = os.cpu_count()
+    # train_val_split: Optional[float] = None
     shuffle: bool = True
+    lazy_load: bool = True
+    row_group_cache_size: int = 200  # Cache row groups for faster batching
+    persistent_workers: bool = True
+    pin_memory: bool = True
+    prefetch_factor: int = 8  # Prefetch batches per worker
 
 
 class HangmanDataModule(LightningDataModule):
     def __init__(self, config: HangmanDataModuleConfig):
         super().__init__()
+        # print("Initializing HangmanDataModule with config:", config)
         self.config = config
+        self.dataset_path = None
         self.dataset = None
         self.train_dataset = None
         self.val_dataset = None
         self.pad_idx = len(DEFAULT_ALPHABET) + 1
 
+    def prepare_data(self):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        self.dataset_path = self._resolve_parquet_path()
+
+        if self.dataset_path.exists():
+            logger.info("Dataset already present at %s", self.dataset_path)
+            self.config.parquet_path = self.dataset_path
+            return
+
+        logger.info("Dataset missing at %s; generating...", self.dataset_path)
+
+        # Read all words
+        words = read_words_list(str(self.config.words_path))
+
+        # Define schema for raw trajectory data (no encoding/padding)
+        schema = pa.schema(
+            [
+                ("word", pa.string()),
+                ("state", pa.list_(pa.string())),
+                ("targets", pa.map_(pa.int32(), pa.string())),  # {position: letter}
+                ("length", pa.int64()),
+            ]
+        )
+
+        # Ensure parent directory exists
+        self.dataset_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write parquet file in batches to avoid memory issues
+        batch_size = 10_000  # Process 10k words at a time
+        total_samples_written = 0
+
+        writer = None
+        try:
+            for batch_start in range(0, len(words), batch_size):
+                batch_end = min(batch_start + batch_size, len(words))
+                word_batch = words[batch_start:batch_end]
+
+                logger.info(
+                    "Processing words %d-%d / %d", batch_start, batch_end, len(words)
+                )
+
+                # Generate samples for this batch
+                batch_samples = generate_full_dataset(
+                    words=word_batch,
+                    strategies=list(self.config.strategies),
+                    parallel=True,
+                    num_workers=self.config.num_workers,
+                )
+
+                # Convert to PyArrow table
+                records = [vars(sample) for sample in batch_samples]
+                batch_table = pa.Table.from_pylist(records, schema=schema)
+
+                # Write to parquet (create writer on first batch)
+                if writer is None:
+                    writer = pq.ParquetWriter(self.dataset_path, schema)
+
+                writer.write_table(batch_table)
+                total_samples_written += len(batch_samples)
+
+                logger.info(
+                    "Wrote %d samples (total: %d)",
+                    len(batch_samples),
+                    total_samples_written,
+                )
+
+                # Free memory
+                del batch_samples, records, batch_table
+
+        finally:
+            if writer is not None:
+                writer.close()
+
     def setup(self, stage: Optional[str] = None) -> None:
-        if self.dataset is None:
-            dataset_config = HangmanDatasetConfig(parquet_path=self.config.parquet_path)
-            self.dataset = HangmanDataset(dataset_config)
-            self.pad_idx = self.dataset._pad_idx  # internal constant
+        # Use dataset_path if already set, otherwise resolve it
+        if self.dataset_path is None:
+            self.dataset_path = self._resolve_parquet_path()
 
-            total_len = len(self.dataset)
-            train_len = int(total_len * self.config.train_val_split)
-            val_len = total_len - train_len
+        dataset_config = HangmanDatasetConfig(
+            parquet_path=self.dataset_path,
+            row_group_cache_size=self.config.row_group_cache_size,
+        )
+        self.dataset = HangmanDataset(dataset_config)
+        self.train_dataset = self.dataset
+        self.val_dataset = None
 
-            if val_len == 0:
-                train_len = max(total_len - 1, 1)
-                val_len = total_len - train_len
+    def _resolve_parquet_path(self) -> Path:
+        # Check if default parquet path exists
+        if DEFAULT_PARQUET_PATH.exists():
+            logger.info("Using existing default parquet at %s", DEFAULT_PARQUET_PATH)
+            return DEFAULT_PARQUET_PATH
 
-            self.train_dataset, self.val_dataset = random_split(
-                self.dataset, lengths=[train_len, val_len]
-            )
+        # Otherwise use default parquet path as target
+        return DEFAULT_PARQUET_PATH
 
     def train_dataloader(self) -> DataLoader:
+        num_workers = self.config.num_workers
+        # Persistent workers requires num_workers > 0
+        persistent_workers = self.config.persistent_workers and num_workers > 0
+        # prefetch_factor only valid when num_workers > 0
+        prefetch_factor = self.config.prefetch_factor if num_workers > 0 else None
+
         return DataLoader(
             self.train_dataset,
             batch_size=self.config.batch_size,
             shuffle=self.config.shuffle,
-            num_workers=self.config.num_workers,
+            num_workers=num_workers,
             collate_fn=self._collate,
+            persistent_workers=persistent_workers,
+            pin_memory=self.config.pin_memory,
+            prefetch_factor=prefetch_factor,
+            multiprocessing_context='fork' if num_workers > 0 else None,
         )
 
-    def val_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self.val_dataset,
-            batch_size=self.config.batch_size,
-            shuffle=False,
-            num_workers=self.config.num_workers,
-            collate_fn=self._collate,
-        )
+    # # def val_dataloader(self):
+    # #     if self.val_dataset is None:
+    # #         return []
+    # #     return DataLoader(
+    # #         self.val_dataset,
+    # #         batch_size=self.config.batch_size,
+    # #         shuffle=False,
+    # #         num_workers=self.config.num_workers,
+    # #         collate_fn=self._collate,
+    # #     )
 
     def _collate(self, batch):
-        inputs = [item["inputs"] for item in batch]
-        labels = [item["labels"] for item in batch]
-        label_mask = [item["label_mask"] for item in batch]
-        miss_chars = [item["miss_chars"] for item in batch]
-        lengths = [item["length"] for item in batch]
+        """Collate batch items with padding to MAX_WORD_LENGTH.
 
-        inputs = torch.nn.utils.rnn.pad_sequence(
-            inputs, batch_first=True, padding_value=self.pad_idx
-        )
-        labels = torch.nn.utils.rnn.pad_sequence(
-            labels, batch_first=True, padding_value=0.0
-        )
-        label_mask = torch.nn.utils.rnn.pad_sequence(
-            label_mask, batch_first=True, padding_value=0.0
-        )
+        Pads all sequences to a fixed MAX_WORD_LENGTH for consistent tensor sizes.
+        Labels are 2D tensors padded to (MAX_WORD_LENGTH x num_letters).
+        """
+        MAX_WORD_LENGTH = 45
+        batch_size = len(batch)
 
-        miss_chars = torch.stack(miss_chars)
-        lengths = torch.stack(lengths)
+        # words = [item["word"] for item in batch]
 
-        # logger.debug(
-        #     "Collated batch shapes — inputs: %s, labels: %s, label_mask: %s, miss_chars: %s, lengths: %s",
-        #     tuple(inputs.shape),
-        #     tuple(labels.shape),
-        #     tuple(label_mask.shape),
-        #     tuple(miss_chars.shape),
-        #     tuple(lengths.shape),
-        # )
+        # Pre-allocate tensors for better performance
+        num_letters = batch[0]["labels"].shape[1]
+        inputs_tensor = torch.full((batch_size, MAX_WORD_LENGTH), self.pad_idx, dtype=torch.long)
+        labels_tensor = torch.zeros((batch_size, MAX_WORD_LENGTH, num_letters), dtype=torch.float32)
+        masks_tensor = torch.zeros((batch_size, MAX_WORD_LENGTH), dtype=torch.float32)
+        lengths_list = []
+
+        # Fill pre-allocated tensors
+        for i, item in enumerate(batch):
+            inp = item["inputs"]
+            lbl = item["labels"]
+            mask = item["label_mask"]
+
+            inp_len = min(inp.shape[0], MAX_WORD_LENGTH)
+            lbl_len = min(lbl.shape[0], MAX_WORD_LENGTH)
+            mask_len = min(mask.shape[0], MAX_WORD_LENGTH)
+
+            inputs_tensor[i, :inp_len] = inp[:inp_len]
+            labels_tensor[i, :lbl_len, :] = lbl[:lbl_len, :]
+            masks_tensor[i, :mask_len] = mask[:mask_len]
+            lengths_list.append(item["length"])
+
+        # Convert lengths efficiently
+        if isinstance(lengths_list[0], torch.Tensor):
+            lengths_tensor = torch.stack(lengths_list)
+        else:
+            lengths_tensor = torch.tensor(lengths_list, dtype=torch.long)
+
+        logger.debug(
+            "Collated batch shapes — inputs: %s, labels: %s, label_mask: %s, lengths: %s",
+            tuple(inputs_tensor.shape),
+            tuple(labels_tensor.shape),
+            tuple(masks_tensor.shape),
+            tuple(lengths_tensor.shape),
+        )
 
         return {
-            "inputs": inputs,
-            "labels": labels,
-            "label_mask": label_mask,
-            "miss_chars": miss_chars,
-            "lengths": lengths,
+            "inputs": inputs_tensor,
+            "labels": labels_tensor,
+            "label_mask": masks_tensor,
+            "lengths": lengths_tensor,
+            # "words": words,
         }

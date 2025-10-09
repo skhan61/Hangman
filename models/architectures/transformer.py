@@ -14,9 +14,9 @@ from models.architectures.base import BaseArchitecture, BaseConfig
 @dataclass
 class HangmanTransformerConfig(BaseConfig):
     embedding_dim: int = 256
-    num_heads: int = 8
+    num_heads: int = 16
     ff_dim: int = 512
-    num_layers: int = 4
+    num_layers: int = 6
     dropout: float = 0.1
     use_sinusoidal_positional_encoding: bool = False
 

@@ -8,7 +8,7 @@ from .architectures import (
     HangmanTransformer,
     HangmanTransformerConfig,
 )
-from .lightning_module import HangmanLightningModule, TrainingConfig
+from .lightning_module import HangmanLightningModule, TrainingModuleConfig
 from .metrics import MaskedAccuracy
 
 __all__ = [
@@ -19,6 +19,6 @@ __all__ = [
     "HangmanTransformer",
     "HangmanTransformerConfig",
     "HangmanLightningModule",
-    "TrainingConfig",
+    "TrainingModuleConfig",
     "MaskedAccuracy",
 ]

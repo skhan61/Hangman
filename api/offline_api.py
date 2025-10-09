@@ -136,9 +136,10 @@ class HangmanOfflineAPI:
 
         if parallel:
             dictionary_path = self.dictionary_file_location
+            strategy = self.strategy
             with ProcessPoolExecutor(max_workers=max_workers) as executor:
                 tasks = [
-                    executor.submit(_simulate_single_word, (word, dictionary_path))
+                    executor.submit(_simulate_single_word, (word, dictionary_path, strategy))
                     for word in word_list
                 ]
 
@@ -182,9 +183,9 @@ class HangmanOfflineAPI:
         return _aggregate_results(word_results)
 
 
-def _simulate_single_word(args: Tuple[str, str]) -> Dict:
-    word, dictionary_path = args
-    api = HangmanOfflineAPI(dictionary_file_location=dictionary_path)
+def _simulate_single_word(args: Tuple[str, str, GuessStrategy]) -> Dict:
+    word, dictionary_path, strategy = args
+    api = HangmanOfflineAPI(dictionary_file_location=dictionary_path, strategy=strategy)
     win, attempts_remaining, progress = api.play_a_game_with_a_word(word)
     return {
         "word": word,
