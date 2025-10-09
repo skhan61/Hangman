@@ -13,7 +13,8 @@ from typing import Iterable, List
 import numpy as np
 
 from api.offline_api import HangmanOfflineAPI
-from api.guess_strategies import frequency_guess_strategy, bert_style_guess_strategy
+from api.guess_strategies \
+    import frequency_guess_strategy, bert_style_guess_strategy
 
 log = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         log.warning("No words available to test")
         return
 
+    log.info("Using guess strategy: %s", frequency_guess_strategy.__name__)
     api = HangmanOfflineAPI(strategy=frequency_guess_strategy)  # bert_style_guess_strategy
 
     sample_word = words[0]
@@ -131,6 +133,20 @@ def main(argv: Iterable[str] | None = None) -> None:
     for length, stats in sorted(summary["results_by_length"].items()):
         log.debug("length=%s stats=%s", length, stats)
 
+    log.info("Done")
+
+    log.info("Using guess strategy: %s", bert_style_guess_strategy.__name__)
+    api = HangmanOfflineAPI(strategy=bert_style_guess_strategy)
+    summary = api.simulate_games_for_word_list(
+        words, 
+        parallel=args.parallel, 
+        max_workers=args.max_workers
+    )
+    log.info("Aggregate results: overall=%s", summary["overall"])
+    for length, stats in sorted(summary["results_by_length"].items()):
+        log.debug("length=%s stats=%s", length, stats)
+
+    log.info("Done")
 
 if __name__ == "__main__":
     main()
