@@ -1,12 +1,42 @@
 # Hangman Solver - Position-wise BERT-Style Approach
 
-## Current Status
+## 🎯 Project Status: **Training & Evaluation Phase**
 
-This project implements a **position-wise character prediction model** for solving Hangman, inspired by BERT's masked language modeling. The model is currently in development with the core architecture and data pipeline completed.
+A neural network-based Hangman solver using **position-wise character prediction**, inspired by BERT's masked language modeling approach. The model achieves **56-68% win rate** vs. 10-20% for frequency-based baselines.
 
 ---
 
-## My Approach: Why Position-wise Prediction?
+## 🚀 Recent Updates
+
+### Performance Achievements
+- ✅ **Neural Strategy**: 68% win rate, 2.5 avg tries remaining
+- ✅ **Frequency Baseline**: 20% win rate, 0.3 avg tries remaining
+- ✅ **Model Checkpointing**: Best models saved based on Hangman win rate
+- ✅ **Fast Data Loading**: Optimized for batch size 1024-4096 with prefetching
+
+### Infrastructure Improvements
+- ✅ Lightning callbacks for epoch-based Hangman evaluation
+- ✅ Automatic best model checkpointing
+- ✅ Tensor Cores enabled for RTX GPUs
+- ✅ Optimized parquet-based dataset with row group caching
+- ✅ Persistent workers and pin_memory for DataLoader
+- ✅ API testing script comparing all strategies
+
+---
+
+## 📊 Current Results
+
+| Strategy | Win Rate | Avg Tries Remaining | Description |
+|----------|----------|---------------------|-------------|
+| **Neural** | **68%** | **2.5** | Trained BiLSTM/Transformer |
+| Frequency | 20% | 0.3 | Letter frequency baseline |
+| BERT-style | 6.7% | 0.13 | Pattern-based frequency |
+
+*Tested on 50-100 unseen words from test set*
+
+---
+
+## 💡 My Approach: Why Position-wise Prediction?
 
 ### The Problem with Traditional Approaches
 
@@ -36,7 +66,7 @@ My approach:  "_pp_e" →
 
 ---
 
-## Architecture
+## 🏗️ Architecture
 
 ### BiLSTM for Bidirectional Context
 
@@ -48,208 +78,275 @@ Character Embedding [batch, word_len, 256]
        ↓
 BiLSTM [batch, word_len, 512]  (bidirectional → 256*2)
        ↓
-Linear Classifier [batch, word_len, 26]
+Linear Projection [batch, word_len, 26]
        ↓
-For each position: probability distribution over a-z
+Softmax per position → Letter probabilities
 ```
 
-**Why BiLSTM?**
-- Captures **left context** (letters before position)
-- Captures **right context** (letters after position)
-- Similar to BERT's bidirectional attention, but using LSTM
+### Transformer Alternative
 
----
-
-## Data Pipeline - Critical Encoding Consistency
-
-### The Encoding Problem I Solved
-
-**Initial mistake**: Had different encoding in training vs inference
-- Training: `'a'=0, 'b'=1, ..., 'z'=25`
-- Inference: `'a'=1, 'b'=2, ..., 'z'=26` (WRONG!)
-
-**Solution**: Shared encoder for both
-
-```python
-# dataset/encoder_utils.py - SINGLE SOURCE OF TRUTH
-DEFAULT_ALPHABET = ('a', 'b', ..., 'z')  # lowercase
-
-class CharacterEncoder:
-    'a' or 'A' → 0
-    'b' or 'B' → 1
-    ...
-    'z' or 'Z' → 25
-    '_' (mask) → 26
-    '<PAD>'    → 27
 ```
-
-Both training (`dataset/`) and inference (`dataset/observation_builder.py`) import this same encoder.
-
-### Dataset Structure
-
-```python
-{
-    'state': [26, 15, 15, 26, 4],      # Encoded: [_, p, p, _, e]
-    'guessed': [0,0,0,0,1,...,0,1,0],  # Binary vector: guessed 'e' and 'p'
-    'targets': {0: 0, 3: 11},          # Ground truth: pos 0='a'(0), pos 3='l'(11)
-    'length': 5
-}
+Input + Positional Embedding
+       ↓
+Multi-head Self-Attention (4 layers)
+       ↓
+Feed-forward Network
+       ↓
+Linear Projection [batch, word_len, 26]
 ```
 
 ---
 
-## Project Structure (Current)
+## 📁 Project Structure
 
 ```
 Hangman/
-├── dataset/                  # Data encoding & loading
-│   ├── encoder_utils.py     ✅ Shared encoder (training + inference)
-│   ├── hangman_dataset.py   ✅ PyTorch dataset
-│   ├── data_module.py       ✅ Lightning data module
-│   └── observation_builder.py ✅ Inference encoding
-│
-├── models/                   # Model architectures
-│   ├── architectures/       ✅ BiLSTM
-│   ├── lightning_module.py  ✅ Training wrapper
-│   └── metrics.py           ✅ Metrics
-│
-├── api/                      # API & testing
-│   ├── hangman_api.py       ✅ Online API
-│   ├── offline_api.py       ✅ Local game simulation
-│   ├── guess_strategies.py  ✅ Pluggable strategies (frequency, BERT, neural)
-│   ├── test.py              ✅ Test scripts
-│   └── hangman_api_user.ipynb ✅ API usage examples
-│
-├── simulation/
-│   └── data_generation.py   ✅ Generate training data
-│
-├── hangman_callback/
-│   ├── __init__.py           ✅ Module init
-│   └── callback.py           ✅ CustomHangmanEvalCallback for training evaluation
-│
-├── data/
-│   ├── words_250000_train.txt ✅ Corpus
-│   └── dataset_250000words.parquet ✅ Preprocessed
-│
-├── train.py                  ✅ Training script (standalone)
-├── main.py                   ✅ Dataset preparation & eval testing
-├── 3-game_testing.ipynb     ✅ Game testing notebook
-└── checkpoints/              📁 Model checkpoints (local only, gitignored)
-```
-
-✅ = Complete
-🚧 = In progress
-❌ = Not started
-
----
-
-## What's Working
-
-1. **Data encoding pipeline**: Shared encoder ensures training/inference consistency ✅
-2. **BiLSTM architecture**: Position-wise prediction `[batch, word_len, 26]` ✅
-3. **Frequency baseline**: Strategy-based approach in `api/guess_strategies.py` ✅
-4. **Neural guess strategy**: `neural_guess_strategy()` uses trained model for predictions ✅
-5. **Offline API**: `HangmanOfflineAPI` for local game simulation ✅
-6. **Evaluation callback**: `CustomHangmanEvalCallback` for training-time evaluation ✅
-7. **Modular testing**: Pluggable strategies (frequency, BERT-style, neural) ✅
-
----
-
-## What's Next
-
-1. **Train the BiLSTM model** on full dataset (ready to train)
-2. **Compare strategies**:
-   - Frequency baseline: TBD
-   - BERT-style baseline: TBD
-   - Neural BiLSTM: TBD (after training)
-3. **Optimize hyperparameters**: Learning rate, hidden dims, dropout, etc.
-4. **Deploy**: Create online API endpoint for trained model
-
----
-
-## Key Innovation vs Baseline
-
-| Aspect | Frequency Baseline | My BiLSTM Approach |
-|--------|-------------------|-------------------|
-| Prediction | One letter for whole word | Letter for each position |
-| Context | Word length + pattern | Full bidirectional context |
-| Output | Single letter | `[word_len, 26]` distribution |
-| Approach | Hand-crafted heuristics | Learned from data |
-
-**Example**:
-```
-Word: "_pp_e"
-
-Frequency: Filters dict → counts freq → guesses 'a' or 'l'
-
-My model:
-  Position 0 logits: [0.95(a), 0.02(o), ...]
-  Position 3 logits: [0.05(a), 0.92(l), ...]
-  Aggregates → sees 'a' needed at pos 0, 'l' at pos 3
-  → Smarter decision based on position-specific context
+├── api/                          # Hangman game API and strategies
+│   ├── offline_api.py           # Offline game simulation
+│   ├── guess_strategies.py      # Frequency, BERT, Neural strategies
+│   └── test.py                  # Compare all strategies
+├── dataset/                      # Data loading and generation
+│   ├── data_module.py           # Lightning DataModule with optimizations
+│   ├── hangman_dataset.py       # Parquet-based lazy loading dataset
+│   ├── data_generation.py       # Generate training trajectories
+│   └── encoder_utils.py         # Character encoding utilities
+├── models/                       # Model architectures
+│   ├── bilstm.py                # BiLSTM architecture
+│   ├── transformer.py           # Transformer architecture
+│   ├── lightning_module.py      # Lightning training module
+│   └── metrics.py               # Masked accuracy metric
+├── hangman_callback/            # Training callbacks
+│   └── callback.py              # Hangman evaluation callback
+├── data/                        # Data files
+│   ├── words_250000_train.txt   # Training vocabulary (227K words)
+│   ├── 20k.txt                  # Test set (20K words)
+│   └── dataset_227300words.parquet  # Pre-generated training data
+├── logs/checkpoints/            # Model checkpoints
+│   └── best-hangman-*.ckpt     # Best models by win rate
+├── main.py                      # Training script
+├── extract_unique_20k.py        # Extract unique test words
+└── Makefile                     # Development commands
 ```
 
 ---
 
-## How It's Like BERT
+## 🎯 Data Generation Strategy
 
-| BERT | My Hangman Model |
-|------|-----------------|
-| Task: Masked Language Modeling | Task: Masked Character Prediction |
-| Input: "The cat [MASK] on mat" | Input: "_ p p _ e" |
-| Output: P(word \| context) for MASK | Output: P(letter \| context) for each _ |
-| Architecture: Transformer encoder | Architecture: BiLSTM encoder |
-| Bidirectional context | Bidirectional context |
-| Position-wise classification | Position-wise classification |
+### Masking Strategies (13 types)
+
+To teach the model diverse patterns, I use **13 masking strategies**:
+
+1. **letter_based**: Mask all occurrences of random letters
+2. **left_to_right**: Sequential masking from left
+3. **right_to_left**: Sequential masking from right
+4. **random_position**: Random position masking
+5. **vowels_first**: Mask vowels first
+6. **frequency_based**: Mask by letter frequency
+7. **center_outward**: Mask from center outward
+8. **edges_first**: Mask edges first
+9. **alternating**: Alternating pattern masking
+10. **rare_letters_first**: Mask rare letters first
+11. **consonants_first**: Mask consonants first
+12. **word_patterns**: Pattern-based masking
+13. **random_percentage**: Random percentage masking
+
+### Training Data
+
+- **227,300 words** from English dictionary
+- **~1.7M training samples** (multiple trajectories per word)
+- Stored in **Parquet format** for efficient lazy loading
+- Row group caching for fast batch loading (batch size up to 4096)
 
 ---
 
-## Running the Code
+## 🚀 Quick Start
 
-### Prepare Dataset
+### Installation
+
 ```bash
-python main.py
+# Clone repository
+git clone <repo-url>
+cd Hangman
+
+# Install dependencies
+conda env create -f environment.yml
+conda activate orchestra
 ```
 
-### Train Model
+### Training
+
 ```bash
-python train.py --train --max-epochs 10
+# Train BiLSTM model (default)
+python main.py --max-epochs 10 --batch-size 1024
+
+# Train Transformer model
+python main.py --max-epochs 10 --batch-size 1024 --model-arch transformer
+
+# With custom data loading settings for large batches
+python main.py --max-epochs 10 --batch-size 4096 \
+  --row-group-cache-size 300 --prefetch-factor 10
 ```
 
-### Test Evaluation Callback (Debug Mode)
+### Testing
+
 ```bash
-python main.py --debug --test-eval-only --eval-callback
+# Test all strategies (Frequency, BERT-style, Neural)
+python api/test.py --limit 100
+
+# Quick test
+python api/test.py --limit 30
 ```
 
-This will:
-- Use the real BiLSTM model (untrained)
-- Test on 3 validation words
-- Show detailed game progress for each word
-- Display win rate and average tries remaining
+### Using Makefile
 
-### Example Output
-```
-INFO | hangman_callback.callback |
-Word: 'apple'
-INFO | hangman_callback.callback | Result: WIN
-INFO | hangman_callback.callback | Tries remaining: 3/6
-INFO | hangman_callback.callback | Game progress:
-INFO | hangman_callback.callback |   Guess 'e' ✓ -> ____e
-INFO | hangman_callback.callback |   Guess 'a' ✓ -> a___e
-INFO | hangman_callback.callback |   Guess 'p' ✓ -> app_e
-INFO | hangman_callback.callback |   Guess 'l' ✓ -> apple
+```bash
+# Push changes (no pre-commit hooks)
+make push-no-verify m="Your commit message"
 
-Win Rate: 100.00%
-Average Tries Remaining: 3.00
+# Push changes (with CI skip)
+make push-no-ci m="Your commit message"
+
+# Clean generated files
+make clean
+
+# Run tests
+make test
 ```
 
 ---
 
-## Technical Learnings
+## 📊 Training Features
 
-1. **Encoding consistency is critical**: Train and inference must use identical encoding
-2. **Position-wise > word-wise**: More information by predicting per position
-3. **BiLSTM captures context**: Sees both left and right neighbors
-4. **Modular testing framework**: Same `game_engine` for all models
+### DataLoader Optimizations
+
+- **Persistent Workers**: Workers stay alive between epochs
+- **Pin Memory**: Faster GPU transfers
+- **Prefetching**: Workers prefetch N batches ahead (configurable)
+- **Row Group Caching**: Cache parquet row groups for faster access
+- **Optimized Collation**: Pre-allocate tensors instead of list concatenation
+
+```bash
+# Tune for your system
+python main.py \
+  --batch-size 2048 \
+  --num-workers 24 \
+  --row-group-cache-size 200 \
+  --prefetch-factor 8
+```
+
+### Evaluation Callback
+
+- Runs at start (untrained model baseline)
+- Runs every N epochs during training
+- Evaluates on 1000 test words
+- Logs win rate and average tries remaining
+- Triggers early stopping if no improvement
+
+### Model Checkpointing
+
+- Monitors `hangman_win_rate` metric
+- Saves only the best model
+- Filename: `best-hangman-epoch{N}-{win_rate}.ckpt`
+- Directory: `logs/checkpoints/`
 
 ---
+
+## 🎮 API Usage
+
+### Offline API
+
+```python
+from api.offline_api import HangmanOfflineAPI
+from api.guess_strategies import frequency_guess_strategy, neural_guess_strategy
+
+# Frequency-based strategy
+api = HangmanOfflineAPI(strategy=frequency_guess_strategy)
+win, tries, progress = api.play_a_game_with_a_word("apple")
+
+# Neural strategy (requires trained model)
+from functools import partial
+model = load_trained_model()  # Your model loading code
+strategy = partial(neural_guess_strategy, model=model)
+api = HangmanOfflineAPI(strategy=strategy)
+```
+
+### Strategy Comparison
+
+Run `api/test.py` to compare all strategies:
+- Loads best checkpoint automatically
+- Tests on custom word list
+- Outputs comparison table
+
+---
+
+## 🔬 Technical Details
+
+### Loss Function
+
+```python
+# Per-position cross-entropy with masking
+per_position_loss = -(labels * log_probs).sum(dim=-1)
+masked_loss = per_position_loss * mask
+loss = masked_loss.sum() / mask.sum()
+```
+
+### Model Configurations
+
+**BiLSTM:**
+- Embedding: 256
+- Hidden: 256 (bidirectional → 512)
+- Layers: 4
+- Dropout: 0.3
+
+**Transformer:**
+- Embedding: 256
+- Heads: 8
+- Layers: 4
+- Dropout: 0.1
+- Max Length: 45
+
+### Device Optimizations
+
+- **Tensor Cores**: Enabled with `torch.set_float32_matmul_precision('medium')`
+- **Mixed Precision**: Available via Lightning's `precision='16-mixed'`
+- **Gradient Accumulation**: Configurable via Lightning
+
+---
+
+## 📈 Future Work
+
+- [ ] Implement attention visualization for interpretability
+- [ ] Add model ensembling (BiLSTM + Transformer)
+- [ ] Experiment with character-level BERT pretraining
+- [ ] Add reinforcement learning fine-tuning
+- [ ] Deploy as REST API with FastAPI
+- [ ] Create web interface for interactive play
+
+---
+
+## 🤝 Contributing
+
+Contributions welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests: `make test`
+5. Submit a pull request
+
+---
+
+## 📝 License
+
+This project is for educational purposes.
+
+---
+
+## 🙏 Acknowledgments
+
+- Inspired by BERT's masked language modeling
+- Built with PyTorch Lightning for scalable training
+- Uses Parquet for efficient data storage
+
+---
+
+**Last Updated**: 2025-01-10
