@@ -70,11 +70,35 @@ class CustomHangmanEvalCallback(Callback):
     # ------------------------------------------------------------------
     # Lightning callback hooks
     # ------------------------------------------------------------------
-    def on_validation_epoch_end(self, trainer, pl_module):  # noqa: D401
-        current_epoch = trainer.current_epoch + 1
-        training_loop = getattr(trainer, "training", False)
+    def on_fit_start(self, trainer, pl_module):  # noqa: D401
+        """Run evaluation before training starts to see untrained model performance."""
+        logger.info("Running hangman evaluation BEFORE training (untrained model)...")
 
-        if training_loop and current_epoch % self.frequency != 0:
+        # Save current training mode
+        pl_module.eval()
+        # Run evaluation (sets model to eval mode)
+        summary = self._run_evaluation(pl_module.model)
+        self.latest_results = summary
+
+        win_rate = summary["win_rate"]
+        avg_tries = summary["average_tries_remaining"]
+
+        logger.info(
+            "BEFORE - Win rate: %.2f%%, Avg tries remaining: %.2f",
+            win_rate * 100,
+            avg_tries,
+        )
+
+        # Restore training mode
+        # if was_training:
+        pl_module.train()
+
+    def on_train_epoch_end(self, trainer, pl_module):  # noqa: D401
+        """Run hangman evaluation at the end of each training epoch."""
+        current_epoch = trainer.current_epoch
+
+        # Check if we should run evaluation this epoch based on frequency
+        if current_epoch % self.frequency != 0:
             logger.debug(
                 "Skipping hangman evaluation at epoch %d (frequency=%d)",
                 current_epoch,
@@ -82,23 +106,37 @@ class CustomHangmanEvalCallback(Callback):
             )
             return
 
+        logger.info("Running hangman evaluation at epoch %d", current_epoch)
+
+        # Set model to eval mode for evaluation
+        pl_module.eval()
+
         summary = self._run_evaluation(pl_module.model)
         self.latest_results = summary
 
         win_rate = summary["win_rate"]
         avg_tries = summary["average_tries_remaining"]
 
-        pl_module.log("hangman_win_rate", win_rate, prog_bar=True, logger=False)
+        # Log metrics for checkpoint monitoring - must use on_epoch=True for ModelCheckpoint
+        pl_module.log("hangman_win_rate", win_rate,
+                     on_step=False, on_epoch=True,
+                     prog_bar=True, logger=False, sync_dist=True)
         pl_module.log(
             "hangman_avg_tries_remaining",
             avg_tries,
+            on_step=False, on_epoch=True,
             prog_bar=False,
-            logger=False,
+            logger=False, sync_dist=True,
         )
 
-        if not training_loop:
-            return
+        logger.info(
+            "Epoch %d - Win rate: %.2f%%, Avg tries: %.2f",
+            current_epoch,
+            win_rate * 100,
+            avg_tries,
+        )
 
+        # Check for improvement and early stopping
         if self._is_improvement(win_rate):
             self._update_best(win_rate)
         elif self.patience > 0:
@@ -109,6 +147,9 @@ class CustomHangmanEvalCallback(Callback):
                     self.patience,
                 )
                 trainer.should_stop = True
+
+        # Restore training mode
+        pl_module.train()
 
     # ------------------------------------------------------------------
     # Internal helpers

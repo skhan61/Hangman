@@ -11,12 +11,16 @@ import argparse
 import logging
 import sys
 import os
+import warnings
 from pathlib import Path
 from typing import Optional
 
 import torch
 from lightning.pytorch import Trainer
-from lightning.pytorch.callbacks import ModelCheckpoint, TQDMProgressBar
+from lightning.pytorch.callbacks import ModelCheckpoint
+
+# Suppress PyTorch nested tensor prototype warning
+warnings.filterwarnings("ignore", message=".*nested tensors is in prototype stage.*")
 
 from dataset.data_module import HangmanDataModule, HangmanDataModuleConfig
 from models import (
@@ -222,32 +226,23 @@ def main() -> None:
     # if args.strategies.lower() == 'all':
     strategies = [
         "letter_based",
-        # "left_to_right",
-        # "right_to_left",
-        # "random_position",
-        # "vowels_first",
-        # "frequency_based",
-        # "center_outward",
-        # "edges_first",
-        # "alternating",
-        # "rare_letters_first",
-        # "consonants_first",
-        # "word_patterns",
-        # "random_percentage",
+        "left_to_right",
+        "right_to_left",
+        "random_position",
+        "vowels_first",
+        "frequency_based",
+        "center_outward",
+        "edges_first",
+        "alternating",
+        "rare_letters_first",
+        "consonants_first",
+        "word_patterns",
+        "random_percentage",
     ]
     # else:
     #     strategies = [s.strip() for s in args.strategies.split(',')]
 
     logger.info("Using masking strategies: %s", strategies)
-
-    # dataset_path = ensure_dataset(
-    #     words_file=args.words_file,
-    #     dataset_path=args.dataset_path,
-    #     # max_words=args.max_words,
-    #     strategies=strategies,
-    #     force=args.force,
-    #     show_summary=args.debug,
-    # )
 
     logger.info(
         f"Preparing data module with batch size {args.batch_size}, num_workers {args.num_workers}"
@@ -304,37 +299,26 @@ def main() -> None:
     mask_idx = len(DEFAULT_ALPHABET)
     pad_idx = len(DEFAULT_ALPHABET) + 1
 
-    # if args.model_arch == "transformer":
-    #     model_config = HangmanTransformerConfig(
-    #         vocab_size=vocab_size,
-    #         mask_idx=mask_idx,
-    #         pad_idx=pad_idx,
-    #         max_word_length=45,  # Use hardcoded max length for all sequences
-    #     )
-    #     model = HangmanTransformer(model_config)
-    #     logger.info("Initialized HangmanTransformer with config: %s", model_config)
-    # else:
-    model_config = HangmanBiLSTMConfig(
-        vocab_size=vocab_size,
-        mask_idx=mask_idx,
-        pad_idx=pad_idx,
-    )
-    model = HangmanBiLSTM(model_config)
-    logger.info("Initialized model with config: %s", model_config)
+    if args.model_arch == "transformer":
+        model_config = HangmanTransformerConfig(
+            vocab_size=vocab_size,
+            mask_idx=mask_idx,
+            pad_idx=pad_idx,
+            max_word_length=45,  # Use hardcoded max length for all sequences
+        )
+        model = HangmanTransformer(model_config)
+        logger.info("Initialized HangmanTransformer with config: %s", model_config)
+    else:
+        model_config = HangmanBiLSTMConfig(
+            vocab_size=vocab_size,
+            mask_idx=mask_idx,
+            pad_idx=pad_idx,
+        )
+        model = HangmanBiLSTM(model_config)
+        logger.info("Initialized model with config: %s", model_config)
 
     logits = model(batch["inputs"], batch["lengths"])
     logger.debug("Model output logits shape: %s", tuple(logits.shape))
-
-    # from tqdm import tqdm
-    # for batch in tqdm(train_loader):
-    #     input = batch["inputs"].to('cuda')
-    #     lengths = batch["lengths"].to('cuda')
-    #     model = model.to('cuda')
-    #     logits = model(input, lengths)
-    #     logger.debug("Model output logits shape: %s", tuple(logits.shape))
-    #     # break  # Just process one batch for demonstration
-
-    # model = model.to('cuda')
 
     lightning_module = HangmanLightningModule(
         model,
@@ -348,35 +332,45 @@ def main() -> None:
     evaluation_callback = CustomHangmanEvalCallback(
         val_words_path=str(args.test_words_file_path),
         dictionary_path=str(args.words_file_path),
-        max_words=1000,
+        max_words=None,
         verbose=args.debug,
         parallel=not args.debug,
         patience=args.patience if args.early_stopping else 0,
         min_delta=args.min_delta,
         mode=args.monitor_mode,
-        frequency=args.test_eval_frequency,
+        frequency=1, # args.test_eval_frequency,
     )
 
-    # logger.info("Running initial hangman evaluation before training...")
-    # eval_summary = evaluation_callback._run_evaluation(
-    #     lightning_module.model,
-    #     )
-    
-    # logger.info("Win rate: %.2f", eval_summary["win_rate"])
-    # logger.info("Average tries remaining: %.2f", \
-    #             eval_summary["average_tries_remaining"])
+    # Setup model checkpoint callback to save BEST model based on hangman win rate
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=args.checkpoint_dir,
+        filename="best-hangman-{epoch:02d}-{hangman_win_rate:.4f}",
+        monitor="hangman_win_rate",
+        mode="max",
+        save_top_k=1,  # Save only the best model
+        save_last=False,  # Don't save last checkpoint
+        verbose=True,
+        every_n_epochs=1,  # Check every epoch (will only save when metric exists)
+    )
+
+    # Enable Tensor Cores for better performance on CUDA devices
+    torch.set_float32_matmul_precision('medium')
+    logger.info("Set float32 matmul precision to 'medium' for Tensor Cores")
 
     trainer_kwargs = {
         "max_epochs": args.max_epochs,
         "logger": False,
-        "enable_checkpointing": False,  # Disable checkpointing to avoid issues
+        "enable_checkpointing": True,  # Enable checkpointing
         "log_every_n_steps": 1,
         "enable_progress_bar": True,
         "accelerator": "auto",
         "num_sanity_val_steps": 0,  # Skip validation sanity checks
     }
 
-    trainer = Trainer(**trainer_kwargs, callbacks=[evaluation_callback])
+    callbacks = [evaluation_callback, checkpoint_callback]
+    logger.info("Best model checkpoint will be saved to: %s", args.checkpoint_dir)
+
+    trainer = Trainer(**trainer_kwargs, callbacks=callbacks)
     # trainer = Trainer(**trainer_kwargs) # , callbacks=[evaluation_callback])
 
     logger.info("Starting training for %s epochs", args.max_epochs)
@@ -387,17 +381,14 @@ def main() -> None:
         logger.error("Training failed with error: %s", e, exc_info=True)
         raise
 
-    logger.info("Running initial hangman evaluation after training...")
-    eval_summary = evaluation_callback._run_evaluation(
-        lightning_module.model,
-        )
+    # logger.info("Running initial hangman evaluation after training...")
+    # eval_summary = evaluation_callback._run_evaluation(
+    #     lightning_module.model,
+    #     )
     
-    logger.info("Win rate: %.2f", eval_summary["win_rate"])
-    logger.info("Average tries remaining: %.2f", \
-                eval_summary["average_tries_remaining"])
-
-
-
+    # logger.info("Win rate: %.2f", eval_summary["win_rate"])
+    # logger.info("Average tries remaining: %.2f", \
+    #             eval_summary["average_tries_remaining"])
 
 if __name__ == "__main__":
     main()
