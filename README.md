@@ -109,30 +109,46 @@ Linear Projection [batch, word_len, 26]
 ```
 Hangman/
 ├── api/                          # Hangman game API and strategies
-│   ├── offline_api.py           # Offline game simulation
-│   ├── guess_strategies.py      # Frequency, BERT, Neural strategies
-│   └── test.py                  # Compare all strategies
+│   ├── __init__.py
+│   ├── guess_strategies.py      # Frequency, contextual, neural strategies
+│   ├── offline_api.py           # Offline game simulation helpers
+│   └── test.py                  # Smoke tests and strategy comparison
 ├── dataset/                      # Data loading and generation
+│   ├── __init__.py
+│   ├── data_generation.py       # Trajectory generation utilities
 │   ├── data_module.py           # Lightning DataModule with optimizations
-│   ├── hangman_dataset.py       # Parquet-based lazy loading dataset
-│   ├── data_generation.py       # Generate training trajectories
-│   └── encoder_utils.py         # Character encoding utilities
+│   ├── encoder_utils.py         # Character encoding utilities
+│   ├── hangman_dataset.py       # Parquet-backed dataset
+│   └── observation_builder.py   # Converts guesses into model observations
 ├── models/                       # Model architectures
-│   ├── bilstm.py                # BiLSTM architecture
-│   ├── transformer.py           # Transformer architecture
-│   ├── lightning_module.py      # Lightning training module
-│   └── metrics.py               # Masked accuracy metric
+│   ├── __init__.py
+│   ├── lightning_module.py      # Training orchestration + metrics
+│   ├── metrics.py               # Custom evaluation metrics
+│   └── architectures/
+│       ├── __init__.py
+│       ├── base.py              # Shared blocks for architectures
+│       ├── bilstm.py            # BiLSTM implementation
+│       └── transformer.py       # Transformer implementation
 ├── hangman_callback/            # Training callbacks
-│   └── callback.py              # Hangman evaluation callback
-├── data/                        # Data files
-│   ├── words_250000_train.txt   # Training vocabulary (227K words)
-│   ├── 20k.txt                  # Test set (20K words)
-│   └── dataset_227300words.parquet  # Pre-generated training data
-├── logs/checkpoints/            # Model checkpoints
-│   └── best-hangman-*.ckpt     # Best models by win rate
-├── main.py                      # Training script
-├── extract_unique_20k.py        # Extract unique test words
-└── Makefile                     # Development commands
+│   ├── __init__.py
+│   └── callback.py              # Periodic Hangman evaluation callback
+├── data/                        # Word lists and evaluation corpora
+│   ├── 20k.txt
+│   ├── test_unique.txt
+│   ├── words_250000_train.txt
+│   ├── dataset_227300words.parquet
+│   └── check_overlap.py
+├── logs/
+│   └── checkpoints/             # Trained model checkpoints
+├── extract_unique_20k.py        # Utility scripts
+├── split_unique_words.py
+├── main.py                      # Training entry point
+├── Makefile                     # Development commands
+├── environment.yaml
+├── pyproject.toml
+├── requirements.txt
+├── setup.py
+└── README.md
 ```
 
 ---
