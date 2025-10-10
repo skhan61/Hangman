@@ -9,10 +9,17 @@ A neural network-based Hangman solver using **position-wise character prediction
 ## 🚀 Recent Updates
 
 ### Performance Achievements
-- ✅ **Neural Strategy**: 68% win rate, 2.5 avg tries remaining
-- ✅ **Frequency Baseline**: 20% win rate, 0.3 avg tries remaining
+- ✅ **Neural Strategy**: 63.3% win rate, 2.1 avg tries remaining (1000-word run)
+- ✅ **Frequency Baseline**: 15.1% win rate, 0.3 avg tries remaining
+- ✅ **Contextual Baseline**: 17.0% win rate, 0.4 avg tries remaining
 - ✅ **Model Checkpointing**: Best models saved based on Hangman win rate
 - ✅ **Fast Data Loading**: Optimized for batch size 1024-4096 with prefetching
+
+### Latest Evaluation (1000-word sample)
+- Compared three strategies on 1000 shuffled words from `data/test_unique.txt`
+- Neural model leads with a 63.3% win rate and 2.1 tries left on average
+- Frequency and pattern-based baselines stay under 20% win rate, underscoring the gap
+- Run executed via `python -m api.test --limit 1000` inside the `orchestra` environment
 
 ### Infrastructure Improvements
 - ✅ Lightning callbacks for epoch-based Hangman evaluation
@@ -28,11 +35,11 @@ A neural network-based Hangman solver using **position-wise character prediction
 
 | Strategy | Win Rate | Avg Tries Remaining | Description |
 |----------|----------|---------------------|-------------|
-| **Neural** | **68%** | **2.5** | Trained BiLSTM/Transformer |
-| Frequency | 20% | 0.3 | Letter frequency baseline |
-| BERT-style | 6.7% | 0.13 | Pattern-based frequency |
+| **Neural** | **63.3%** | **2.1** | Trained position-wise neural model |
+| Frequency | 15.1% | 0.3 | Letter frequency baseline |
+| BERT-style | 17.0% | 0.4 | Pattern-aware heuristic |
 
-*Tested on 50-100 unseen words from test set*
+*Evaluated on 1000 unseen words from `data/test_unique.txt`*
 
 ---
 
@@ -312,41 +319,3 @@ loss = masked_loss.sum() / mask.sum()
 - **Gradient Accumulation**: Configurable via Lightning
 
 ---
-
-## 📈 Future Work
-
-- [ ] Implement attention visualization for interpretability
-- [ ] Add model ensembling (BiLSTM + Transformer)
-- [ ] Experiment with character-level BERT pretraining
-- [ ] Add reinforcement learning fine-tuning
-- [ ] Deploy as REST API with FastAPI
-- [ ] Create web interface for interactive play
-
----
-
-## 🤝 Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests: `make test`
-5. Submit a pull request
-
----
-
-## 📝 License
-
-This project is for educational purposes.
-
----
-
-## 🙏 Acknowledgments
-
-- Inspired by BERT's masked language modeling
-- Built with PyTorch Lightning for scalable training
-- Uses Parquet for efficient data storage
-
----
-
-**Last Updated**: 2025-01-10

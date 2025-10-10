@@ -54,6 +54,9 @@ test: ## Run not slow tests
 test-full: ## Run all tests
 	pytest || echo "Some tests failed."
 
+test-api-1000: ## Run offline API smoke-test on 1000 words
+	conda run -n orchestra python -m api.test --limit 1000 || echo "API test failed."
+
 train: ## Train the model
 	python src/train.py || echo "Training script failed."
 
