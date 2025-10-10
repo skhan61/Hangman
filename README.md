@@ -111,6 +111,8 @@ Hangman/
 ├── api/                          # Hangman game API and strategies
 │   ├── __init__.py
 │   ├── guess_strategies.py      # Frequency, contextual, neural strategies
+│   ├── hangman_api.py           # Core API wiring for interactive agents
+│   ├── hangman_api_user.ipynb   # Notebook demo for manual play
 │   ├── offline_api.py           # Offline game simulation helpers
 │   └── test.py                  # Smoke tests and strategy comparison
 ├── dataset/                      # Data loading and generation
