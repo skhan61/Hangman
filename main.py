@@ -24,6 +24,8 @@ warnings.filterwarnings("ignore", message=".*nested tensors is in prototype stag
 
 from dataset.data_module import HangmanDataModule, HangmanDataModuleConfig
 from models import (
+    HangmanBERT,
+    HangmanBERTConfig,
     HangmanBiLSTM,
     HangmanBiLSTMConfig,
     HangmanTransformer,
@@ -166,9 +168,20 @@ def parse_args() -> argparse.Namespace:
         "--model_arch",
         dest="model_arch",
         type=str,
-        choices=["bilstm", "transformer"],
+        choices=["bilstm", "transformer", "bert"],
         default="bilstm",
         help="Model architecture to use for Hangman training.",
+    )
+    parser.add_argument(
+        "--freeze-bert",
+        action="store_true",
+        help="Freeze all BERT encoder layers (only train embeddings and output head).",
+    )
+    parser.add_argument(
+        "--freeze-bert-layers",
+        type=int,
+        default=0,
+        help="Number of bottom BERT layers to freeze (0 = freeze none, 6 = freeze bottom half).",
     )
     parser.add_argument(
         "--strategies",
@@ -308,6 +321,17 @@ def main() -> None:
         )
         model = HangmanTransformer(model_config)
         logger.info("Initialized HangmanTransformer with config: %s", model_config)
+    elif args.model_arch == "bert":
+        model_config = HangmanBERTConfig(
+            vocab_size=vocab_size,
+            mask_idx=mask_idx,
+            pad_idx=pad_idx,
+            max_word_length=45,  # Use hardcoded max length for all sequences
+            freeze_bert_layers=args.freeze_bert,
+            num_layers_to_freeze=args.freeze_bert_layers,
+        )
+        model = HangmanBERT(model_config)
+        logger.info("Initialized HangmanBERT with config: %s", model_config)
     else:
         model_config = HangmanBiLSTMConfig(
             vocab_size=vocab_size,
@@ -332,7 +356,7 @@ def main() -> None:
     evaluation_callback = CustomHangmanEvalCallback(
         val_words_path=str(args.test_words_file_path),
         dictionary_path=str(args.words_file_path),
-        max_words=None,
+        max_words=1000,
         verbose=args.debug,
         parallel=not args.debug,
         patience=args.patience if args.early_stopping else 0,

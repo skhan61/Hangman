@@ -3,6 +3,8 @@
 from .architectures import (
     BaseArchitecture,
     BaseConfig,
+    HangmanBERT,
+    HangmanBERTConfig,
     HangmanBiLSTM,
     HangmanBiLSTMConfig,
     HangmanTransformer,
@@ -14,6 +16,8 @@ from .metrics import MaskedAccuracy
 __all__ = [
     "BaseArchitecture",
     "BaseConfig",
+    "HangmanBERT",
+    "HangmanBERTConfig",
     "HangmanBiLSTM",
     "HangmanBiLSTMConfig",
     "HangmanTransformer",
