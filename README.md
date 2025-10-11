@@ -21,6 +21,11 @@ A neural network-based Hangman solver using **position-wise character prediction
 - Frequency and pattern-based baselines stay under 20% win rate, underscoring the gap
 - Run executed via `python -m api.test --limit 1000` inside the `orchestra` environment
 
+### Architecture Enhancements
+- ✅ Added a `HangmanBERT` model alongside BiLSTM and Transformer options.
+- ✅ New CLI flags `--freeze-bert` and `--freeze-bert-layers` provide fine-tuning control.
+- ✅ Validation callback now caps evaluation at 1000 words for faster feedback loops.
+
 ### Infrastructure Improvements
 - ✅ Lightning callbacks for epoch-based Hangman evaluation
 - ✅ Automatic best model checkpointing
