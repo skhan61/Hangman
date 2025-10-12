@@ -28,6 +28,16 @@ from models import (
     HangmanBERTConfig,
     HangmanBiLSTM,
     HangmanBiLSTMConfig,
+    HangmanBiLSTMAttention,
+    HangmanBiLSTMAttentionConfig,
+    HangmanBiLSTMMultiHead,
+    HangmanBiLSTMMultiHeadConfig,
+    HangmanCharRNN,
+    HangmanCharRNNConfig,
+    HangmanGRU,
+    HangmanGRUConfig,
+    HangmanMLP,
+    HangmanMLPConfig,
     HangmanTransformer,
     HangmanTransformerConfig,
     HangmanLightningModule,
@@ -43,6 +53,24 @@ from hangman_callback.callback import CustomHangmanEvalCallback
 logger = logging.getLogger(__name__)
 
 
+def parse_eval_words(value: str) -> int | None:
+    """Parse evaluation word limit allowing integers or 'all'."""
+    lowered = value.strip().lower()
+    if lowered == "all":
+        return None
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "eval-words must be a positive integer or 'all'"
+        ) from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(
+            "eval-words must be a positive integer when specified"
+        )
+    return parsed
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prepare hangman dataset")
     parser.add_argument(
@@ -50,15 +78,14 @@ def parse_args() -> argparse.Namespace:
         "--words-file_path",
         dest="words_file_path",
         type=Path,
-        default=Path("data/words_250000_train.txt"),
+        default=Path("data/train_words.txt"),
         help="Text file containing newline-separated candidate words.",
     )
     parser.add_argument(
-        "--test-words-file-path",
         "--test-words-file_path",
         dest="test_words_file_path",
         type=Path,
-        default=Path("data/test_unique.txt"),
+        default=Path("data/test_words.txt"),
         help="Text file containing words used for hangman game testing.",
     )
 
@@ -142,13 +169,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--patience",
         type=int,
-        default=3,
+        default=2,
         help="Number of testing evaluations with no improvement before stopping (requires --early-stopping).",
     )
     parser.add_argument(
         "--min-delta",
         type=float,
-        default=0.0,
+        default=0.01,
         help="Minimum change in hangman win rate to qualify as improvement (requires --early-stopping).",
     )
     parser.add_argument(
@@ -164,11 +191,17 @@ def parse_args() -> argparse.Namespace:
         help="Run the hangman testing callback every N training epochs.",
     )
     parser.add_argument(
+        "--eval-words",
+        type=parse_eval_words,
+        default=None,
+        help="Number of words to use for hangman evaluation (use 'all' for the full list).",
+    )
+    parser.add_argument(
         "--model-arch",
         "--model_arch",
         dest="model_arch",
         type=str,
-        choices=["bilstm", "transformer", "bert"],
+        choices=["bilstm", "bilstm_attention", "bilstm_multihead", "transformer", "bert", "charrnn", "gru", "mlp"],
         default="bilstm",
         help="Model architecture to use for Hangman training.",
     )
@@ -332,14 +365,61 @@ def main() -> None:
         )
         model = HangmanBERT(model_config)
         logger.info("Initialized HangmanBERT with config: %s", model_config)
-    else:
+    elif args.model_arch == "charrnn":
+        model_config = HangmanCharRNNConfig(
+            vocab_size=vocab_size,
+            mask_idx=mask_idx,
+            pad_idx=pad_idx,
+        )
+        model = HangmanCharRNN(model_config)
+        logger.info("Initialized HangmanCharRNN with config: %s", model_config)
+    elif args.model_arch == "gru":
+        model_config = HangmanGRUConfig(
+            vocab_size=vocab_size,
+            mask_idx=mask_idx,
+            pad_idx=pad_idx,
+        )
+        model = HangmanGRU(model_config)
+        logger.info("Initialized HangmanGRU with config: %s", model_config)
+    elif args.model_arch == "mlp":
+        model_config = HangmanMLPConfig(
+            vocab_size=vocab_size,
+            mask_idx=mask_idx,
+            pad_idx=pad_idx,
+            max_word_length=45,  # MLP needs max_word_length for positional embeddings
+        )
+        model = HangmanMLP(model_config)
+        logger.info("Initialized HangmanMLP with config: %s", model_config)
+    elif args.model_arch == "bilstm_attention":
+        model_config = HangmanBiLSTMAttentionConfig(
+            vocab_size=vocab_size,
+            mask_idx=mask_idx,
+            pad_idx=pad_idx,
+        )
+        model = HangmanBiLSTMAttention(model_config)
+        logger.info("Initialized HangmanBiLSTM-Attention with config: %s", model_config)
+    elif args.model_arch == "bilstm_multihead":
+        model_config = HangmanBiLSTMMultiHeadConfig(
+            vocab_size=vocab_size,
+            mask_idx=mask_idx,
+            pad_idx=pad_idx,
+        )
+        model = HangmanBiLSTMMultiHead(model_config)
+        logger.info("Initialized HangmanBiLSTM-MultiHead with config: %s", model_config)
+    elif args.model_arch == "bilstm":
         model_config = HangmanBiLSTMConfig(
             vocab_size=vocab_size,
             mask_idx=mask_idx,
             pad_idx=pad_idx,
         )
         model = HangmanBiLSTM(model_config)
-        logger.info("Initialized model with config: %s", model_config)
+        logger.info("Initialized HangmanBiLSTM with config: %s", model_config)
+    else:
+        raise ValueError(
+            f"Unsupported model architecture: '{args.model_arch}'. "
+            f"Supported architectures: bilstm, bilstm_attention, bilstm_multihead, "
+            f"transformer, bert, charrnn, gru, mlp"
+        )
 
     logits = model(batch["inputs"], batch["lengths"])
     logger.debug("Model output logits shape: %s", tuple(logits.shape))
@@ -352,11 +432,13 @@ def main() -> None:
         ),
     )
 
+    eval_words_display = "all" if args.eval_words is None else args.eval_words
+    logger.info("Hangman evaluation word limit: %s", eval_words_display)
 
     evaluation_callback = CustomHangmanEvalCallback(
         val_words_path=str(args.test_words_file_path),
         dictionary_path=str(args.words_file_path),
-        max_words=1000,
+        max_words=args.eval_words,
         verbose=args.debug,
         parallel=not args.debug,
         patience=args.patience if args.early_stopping else 0,

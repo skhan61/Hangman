@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   update_release_draft:
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip ci]') }}
     permissions:
       # write permission is required to create a github release
       contents: write

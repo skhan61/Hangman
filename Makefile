@@ -67,7 +67,7 @@ commit-push: ## Commit and push changes with a provided commit message
 
 push-no-verify: ## Push changes without pre-push hooks # locally
 	if [ -z "$(m)" ]; then echo "Usage: make push-no-verify m='Your commit message'"; else \
-	git add . && git commit -m "$(m)" && git push --no-verify || echo "Commit or push failed."; \
+	git add . && git commit -m "$(m) [skip ci]" && git push --no-verify || echo "Commit or push failed."; \
 	fi
 
 # push-no-ci: ## Push changes without running tests or CI # github actions

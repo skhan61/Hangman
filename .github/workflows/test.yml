@@ -8,6 +8,7 @@ on:
 
 jobs:
   run_tests_ubuntu:
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -43,6 +44,7 @@ jobs:
           pytest -v
 
   run_tests_macos:
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -78,6 +80,7 @@ jobs:
           pytest -v
 
   run_tests_windows:
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -113,6 +116,7 @@ jobs:
 
   # upload code coverage report
   code-coverage:
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
 
     steps:

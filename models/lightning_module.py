@@ -115,8 +115,28 @@ class HangmanLightningModule(LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(
+        optimizer = torch.optim.Adam(
             self.parameters(),
             lr=self.training_config.learning_rate,
             weight_decay=self.training_config.weight_decay,
         )
+
+        # Add learning rate scheduler
+        # Reduces LR by half when win rate plateaus for 3 epochs
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode='max',              # Maximize hangman_win_rate
+            factor=0.5,              # Reduce LR to 50% when plateau
+            patience=3,              # Wait 3 epochs before reducing LR
+            min_lr=1e-6,             # Don't reduce below 0.000001
+        )
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": "hangman_win_rate",  # Monitor win rate from callback
+                "interval": "epoch",             # Check every epoch
+                "frequency": 1,                  # Check every 1 epoch
+            },
+        }

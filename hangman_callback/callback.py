@@ -65,6 +65,10 @@ class CustomHangmanEvalCallback(Callback):
         self.bad_epochs = 0
         self.latest_results = None
 
+        # Track best win rate and epoch for benchmark reporting
+        self.best_win_rate = 0.0
+        self.best_epoch = 0
+
         logger.info("%d words loaded for testing.", len(self.val_word_list))
 
     # ------------------------------------------------------------------
@@ -130,7 +134,7 @@ class CustomHangmanEvalCallback(Callback):
         )
 
         logger.info(
-            "Epoch %d - Win rate: %.2f%%, Avg tries: %.2f",
+            "Epoch %d - Win rate: %.2f%%, Avg tries remaining: %.2f",
             current_epoch,
             win_rate * 100,
             avg_tries,
@@ -138,7 +142,7 @@ class CustomHangmanEvalCallback(Callback):
 
         # Check for improvement and early stopping
         if self._is_improvement(win_rate):
-            self._update_best(win_rate)
+            self._update_best(win_rate, current_epoch)
         elif self.patience > 0:
             self.bad_epochs += 1
             if self.bad_epochs > self.patience:
@@ -230,7 +234,9 @@ class CustomHangmanEvalCallback(Callback):
             return metric_value > self.best_metric_value + self.min_delta
         return metric_value < self.best_metric_value - self.min_delta
 
-    def _update_best(self, metric_value: float) -> None:
+    def _update_best(self, metric_value: float, epoch: int = 0) -> None:
         self.best_metric_value = metric_value
+        self.best_win_rate = metric_value  # Track for benchmark
+        self.best_epoch = epoch            # Track for benchmark
         self.bad_epochs = 0
         logger.info("New best hangman win rate: %.2f%%", metric_value * 100.0)
