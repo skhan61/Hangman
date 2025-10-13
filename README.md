@@ -285,7 +285,7 @@ Hangman/
 │   ├── words_250000_train.txt   # Training dictionary (227,300 words)
 │   ├── test_unique.txt          # Test set for evaluation
 │   ├── 20k.txt                  # Small test set
-│   ├── dataset_227300words.parquet  # Preprocessed training data (~1.7M samples)
+│   ├── dataset_227300words.parquet  # Preprocessed training data (~21M samples)
 │   ├── word_length_stats.py    # Dataset statistics
 │   └── check_overlap.py         # Verify train/test separation
 │
@@ -505,7 +505,7 @@ See [api/3-game_testing.ipynb](api/3-game_testing.ipynb) for the complete testin
 ### Training Data Pipeline
 
 **Source:** 227,300 words from English dictionary
-**Output:** ~1.7M training samples
+**Output:** ~21M training samples
 **Format:** Parquet (efficient lazy loading)
 
 ### 13 Masking Strategies
@@ -545,7 +545,7 @@ Step 5: "APPLE"  → Complete! (no more targets)
 # Each step becomes a training sample
 ```
 
-**Total Training Samples:** ~1.7M trajectories from 227K words
+**Total Training Samples:** ~21M trajectories from 227K words
 
 ---
 
