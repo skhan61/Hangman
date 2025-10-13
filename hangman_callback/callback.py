@@ -122,15 +122,23 @@ class CustomHangmanEvalCallback(Callback):
         avg_tries = summary["average_tries_remaining"]
 
         # Log metrics for checkpoint monitoring - must use on_epoch=True for ModelCheckpoint
-        pl_module.log("hangman_win_rate", win_rate,
-                     on_step=False, on_epoch=True,
-                     prog_bar=True, logger=False, sync_dist=True)
+        pl_module.log(
+            "hangman_win_rate",
+            win_rate,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            logger=False,
+            sync_dist=True,
+        )
         pl_module.log(
             "hangman_avg_tries_remaining",
             avg_tries,
-            on_step=False, on_epoch=True,
+            on_step=False,
+            on_epoch=True,
             prog_bar=False,
-            logger=False, sync_dist=True,
+            logger=False,
+            sync_dist=True,
         )
 
         logger.info(
@@ -237,6 +245,6 @@ class CustomHangmanEvalCallback(Callback):
     def _update_best(self, metric_value: float, epoch: int = 0) -> None:
         self.best_metric_value = metric_value
         self.best_win_rate = metric_value  # Track for benchmark
-        self.best_epoch = epoch            # Track for benchmark
+        self.best_epoch = epoch  # Track for benchmark
         self.bad_epochs = 0
         logger.info("New best hangman win rate: %.2f%%", metric_value * 100.0)

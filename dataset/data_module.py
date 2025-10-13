@@ -26,21 +26,21 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_WORDS_FILE = Path("data/words_250000_train.txt")
 
-DEFAULT_STRATEGIES = [
-    "letter_based",
-    "left_to_right",
-    "right_to_left",
-    "random_position",
-    "vowels_first",
-    "frequency_based",
-    "center_outward",
-    "edges_first",
-    "alternating",
-    "rare_letters_first",
-    "consonants_first",
-    "word_patterns",
-    "random_percentage",
-]
+# DEFAULT_STRATEGIES = [
+#     "letter_based",
+#     "left_to_right",
+#     "right_to_left",
+#     "random_position",
+#     "vowels_first",
+#     "frequency_based",
+#     "center_outward",
+#     "edges_first",
+#     "alternating",
+#     "rare_letters_first",
+#     "consonants_first",
+#     "word_patterns",
+#     "random_percentage",
+# ]
 DEFAULT_PARQUET_PATH = Path("data/dataset_227300words.parquet")
 from .data_generation import generate_full_dataset
 
@@ -49,7 +49,7 @@ from .data_generation import generate_full_dataset
 class HangmanDataModuleConfig:
     words_path: Path = DEFAULT_WORDS_FILE
     # eval_words_path: Optional[Path] = (None,)
-    strategies: Sequence[str] = tuple(DEFAULT_STRATEGIES)
+    strategies: Sequence[str] = None,
     batch_size: int = 1024
     num_workers: int = os.cpu_count()
     # train_val_split: Optional[float] = None
@@ -70,7 +70,6 @@ class HangmanDataModule(LightningDataModule):
         self.dataset = None
         self.train_dataset = None
         self.val_dataset = None
-        self.pad_idx = len(DEFAULT_ALPHABET) + 1
 
     def prepare_data(self):
         import pyarrow as pa
@@ -181,7 +180,7 @@ class HangmanDataModule(LightningDataModule):
             batch_size=self.config.batch_size,
             shuffle=self.config.shuffle,
             num_workers=num_workers,
-            collate_fn=self._collate,
+            collate_fn=HangmanDataset.collate_fn,
             persistent_workers=persistent_workers,
             pin_memory=self.config.pin_memory,
             prefetch_factor=prefetch_factor,
@@ -196,60 +195,5 @@ class HangmanDataModule(LightningDataModule):
     # #         batch_size=self.config.batch_size,
     # #         shuffle=False,
     # #         num_workers=self.config.num_workers,
-    # #         collate_fn=self._collate,
+    # #         collate_fn=HangmanDataset.collate_fn,
     # #     )
-
-    def _collate(self, batch):
-        """Collate batch items with padding to MAX_WORD_LENGTH.
-
-        Pads all sequences to a fixed MAX_WORD_LENGTH for consistent tensor sizes.
-        Labels are 2D tensors padded to (MAX_WORD_LENGTH x num_letters).
-        """
-        MAX_WORD_LENGTH = 45
-        batch_size = len(batch)
-
-        # words = [item["word"] for item in batch]
-
-        # Pre-allocate tensors for better performance
-        num_letters = batch[0]["labels"].shape[1]
-        inputs_tensor = torch.full((batch_size, MAX_WORD_LENGTH), self.pad_idx, dtype=torch.long)
-        labels_tensor = torch.zeros((batch_size, MAX_WORD_LENGTH, num_letters), dtype=torch.float32)
-        masks_tensor = torch.zeros((batch_size, MAX_WORD_LENGTH), dtype=torch.float32)
-        lengths_list = []
-
-        # Fill pre-allocated tensors
-        for i, item in enumerate(batch):
-            inp = item["inputs"]
-            lbl = item["labels"]
-            mask = item["label_mask"]
-
-            inp_len = min(inp.shape[0], MAX_WORD_LENGTH)
-            lbl_len = min(lbl.shape[0], MAX_WORD_LENGTH)
-            mask_len = min(mask.shape[0], MAX_WORD_LENGTH)
-
-            inputs_tensor[i, :inp_len] = inp[:inp_len]
-            labels_tensor[i, :lbl_len, :] = lbl[:lbl_len, :]
-            masks_tensor[i, :mask_len] = mask[:mask_len]
-            lengths_list.append(item["length"])
-
-        # Convert lengths efficiently
-        if isinstance(lengths_list[0], torch.Tensor):
-            lengths_tensor = torch.stack(lengths_list)
-        else:
-            lengths_tensor = torch.tensor(lengths_list, dtype=torch.long)
-
-        logger.debug(
-            "Collated batch shapes — inputs: %s, labels: %s, label_mask: %s, lengths: %s",
-            tuple(inputs_tensor.shape),
-            tuple(labels_tensor.shape),
-            tuple(masks_tensor.shape),
-            tuple(lengths_tensor.shape),
-        )
-
-        return {
-            "inputs": inputs_tensor,
-            "labels": labels_tensor,
-            "label_mask": masks_tensor,
-            "lengths": lengths_tensor,
-            # "words": words,
-        }

@@ -6,6 +6,11 @@ A neural network-based Hangman solver using **position-wise character prediction
 
 ---
 
+## 🛠️ Development Environment
+- Run all Python commands inside the local `orchestra` conda environment (e.g., `conda run -n orchestra python -m api.test`).
+
+---
+
 ## 🚀 Recent Updates
 
 ### Performance Achievements

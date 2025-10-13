@@ -237,6 +237,62 @@ class HangmanDataset(Dataset):
         self._cache.clear()
         self._cache_order.clear()
 
+    @staticmethod
+    def collate_fn(batch):
+        """Collate batch items with padding to MAX_WORD_LENGTH.
+
+        Pads all sequences to a fixed MAX_WORD_LENGTH for consistent tensor sizes.
+        Labels are 2D tensors padded to (MAX_WORD_LENGTH x num_letters).
+        """
+        MAX_WORD_LENGTH = 45
+        batch_size = len(batch)
+
+        # Calculate pad_idx based on alphabet length
+        pad_idx = len(DEFAULT_ALPHABET) + 1
+
+        # Pre-allocate tensors for better performance
+        num_letters = batch[0]["labels"].shape[1]
+        inputs_tensor = torch.full((batch_size, MAX_WORD_LENGTH), pad_idx, dtype=torch.long)
+        labels_tensor = torch.zeros((batch_size, MAX_WORD_LENGTH, num_letters), dtype=torch.float32)
+        masks_tensor = torch.zeros((batch_size, MAX_WORD_LENGTH), dtype=torch.float32)
+        lengths_list = []
+
+        # Fill pre-allocated tensors
+        for i, item in enumerate(batch):
+            inp = item["inputs"]
+            lbl = item["labels"]
+            mask = item["label_mask"]
+
+            inp_len = min(inp.shape[0], MAX_WORD_LENGTH)
+            lbl_len = min(lbl.shape[0], MAX_WORD_LENGTH)
+            mask_len = min(mask.shape[0], MAX_WORD_LENGTH)
+
+            inputs_tensor[i, :inp_len] = inp[:inp_len]
+            labels_tensor[i, :lbl_len, :] = lbl[:lbl_len, :]
+            masks_tensor[i, :mask_len] = mask[:mask_len]
+            lengths_list.append(item["length"])
+
+        # Convert lengths efficiently
+        if isinstance(lengths_list[0], torch.Tensor):
+            lengths_tensor = torch.stack(lengths_list)
+        else:
+            lengths_tensor = torch.tensor(lengths_list, dtype=torch.long)
+
+        logger.debug(
+            "Collated batch shapes — inputs: %s, labels: %s, label_mask: %s, lengths: %s",
+            tuple(inputs_tensor.shape),
+            tuple(labels_tensor.shape),
+            tuple(masks_tensor.shape),
+            tuple(lengths_tensor.shape),
+        )
+
+        return {
+            "inputs": inputs_tensor,
+            "labels": labels_tensor,
+            "label_mask": masks_tensor,
+            "lengths": lengths_tensor,
+        }
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")

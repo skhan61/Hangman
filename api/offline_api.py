@@ -22,7 +22,8 @@ class HangmanOfflineAPI:
 
     def __init__(
         self,
-        dictionary_file_location: str = "/home/sayem/Desktop/Hangman/data/words_250000_train.txt",
+        dictionary_file_location: \
+            str = "/home/sayem/Desktop/Hangman/data/words_250000_train.txt",
         *,
         strategy: GuessStrategy | None = None,
     ) -> None:
@@ -37,7 +38,7 @@ class HangmanOfflineAPI:
             "Strategy name: %s",
             getattr(self.strategy, "__name__", repr(self.strategy)),
         )
-        self.start_new_game()
+        # self.start_new_game()
 
     def build_dictionary(self, dictionary_file_location: str) -> List[str]:
         with open(dictionary_file_location, "r", encoding="utf-8") as fp:
@@ -45,7 +46,6 @@ class HangmanOfflineAPI:
 
     def start_new_game(self) -> None:
         self.guessed_letters: List[str] = []
-        self.incorrect_letters: set[str] = set()
         self.current_dictionary: List[str] = list(self.full_dictionary)
 
     def guess(self, masked_state: str) -> str:
@@ -90,6 +90,8 @@ class HangmanOfflineAPI:
             raise ValueError("Masked word length must match the target word length.")
 
         self.start_new_game()
+        incorrect_letters = set()
+        # self.guessed_letters: List[str] = []
 
         attempts_remaining = max_attempts
         game_progress: List[Tuple[str, str, bool]] = []
@@ -102,7 +104,7 @@ class HangmanOfflineAPI:
 
             if not guess_correct:
                 attempts_remaining -= 1
-                self.incorrect_letters.add(guess_letter)
+                incorrect_letters.add(guess_letter)
                 self.current_dictionary = [
                     candidate
                     for candidate in self.current_dictionary

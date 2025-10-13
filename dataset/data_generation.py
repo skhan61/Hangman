@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover - tqdm optional at runtime
 from dataset.encoder_utils import DEFAULT_ALPHABET, CharacterEncoder
 
 # Set NumExpr to use all cores
-os.environ.setdefault('NUMEXPR_MAX_THREADS', str(cpu_count()))
+os.environ.setdefault("NUMEXPR_MAX_THREADS", str(cpu_count()))
 
 
 ENCODER = CharacterEncoder(
@@ -20,6 +20,7 @@ ENCODER = CharacterEncoder(
     mask_token="_",
     pad_token="<PAD>",
 )
+
 
 def read_words_list(file_path):
     """Read words from a text file and return as a list."""
@@ -55,6 +56,7 @@ def _collect_targets(word: str, state: List[Optional[str]]) -> Dict[int, str]:
 
     return {idx: word[idx] for idx, value in enumerate(state) if value is None}
 
+
 @dataclass
 class Sample:
     """Sample ready for parquet serialization - NO padding, NO encoding.
@@ -65,6 +67,7 @@ class Sample:
     - targets: dict of {position: letter} for unrevealed positions
     - length: word length
     """
+
     word: str
     state: List[Optional[str]]
     targets: Dict[int, str]
@@ -597,7 +600,7 @@ def generate_full_dataset(
                 f"Unknown strategy '{strategy}'. "
                 f"Valid options: {list(strategy_functions.keys())}"
             )
-        
+
     # print(type(Sample))
 
     records: List[Sample] = []
@@ -669,4 +672,3 @@ def generate_full_dataset(
             iterator.close()
 
     return records
-

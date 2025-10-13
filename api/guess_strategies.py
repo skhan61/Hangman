@@ -38,7 +38,7 @@ def _collect_candidates(
         for candidate in base_candidates
         if len(candidate) == len(masked_word)
         and pattern.match(candidate)
-        and context.incorrect_letters.isdisjoint(candidate)
+        # and context.incorrect_letters.isdisjoint(candidate)
     ]
 
     if not candidates:
@@ -46,7 +46,7 @@ def _collect_candidates(
             word
             for word in context.full_dictionary
             if len(word) == len(masked_word)
-            and context.incorrect_letters.isdisjoint(word)
+            # and context.incorrect_letters.isdisjoint(word)
         ]
 
     context.current_dictionary = candidates
@@ -156,61 +156,272 @@ def bert_style_guess_strategy(
     return positional_frequency_strategy(masked_state, context)
 
 
-def _ngram_counter(masked_word: str, candidates: List[str]) -> collections.Counter:
-    """Count letters using n-gram context (bigrams and trigrams).
+def _build_position_aware_ngrams(candidates: List[str], max_n: int = 4):
+    """Build position-aware n-grams from filtered candidates.
 
-    Uses surrounding revealed letters to predict masked positions.
-    For example, if we see 'Q_', we know next letter is likely 'U'.
+    Returns n-grams at specific positions in words.
+    More accurate than position-independent n-grams.
     """
-    letter_scores = collections.Counter()
-    masked_positions = [idx for idx, char in enumerate(masked_word) if char == "_"]
+    # Position-aware n-gram models
+    unigrams = collections.defaultdict(lambda: collections.defaultdict(int))  # [pos][letter]
+    bigrams = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(int)))  # [pos][l1][l2]
+    trigrams = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(int))))  # [pos][l1][l2][l3]
+    fourgrams = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(int)))))  # [pos][l1][l2][l3][l4]
+
+    for word in candidates:
+        word_len = len(word)
+
+        # Build unigrams
+        for i, letter in enumerate(word):
+            unigrams[i][letter] += 1
+
+        # Build bigrams
+        for i in range(word_len - 1):
+            bigrams[i][word[i]][word[i+1]] += 1
+
+        # Build trigrams
+        for i in range(word_len - 2):
+            trigrams[i][word[i]][word[i+1]][word[i+2]] += 1
+
+        # Build fourgrams
+        if max_n >= 4:
+            for i in range(word_len - 3):
+                fourgrams[i][word[i]][word[i+1]][word[i+2]][word[i+3]] += 1
+
+    return unigrams, bigrams, trigrams, fourgrams
+
+
+def _score_with_ngrams(masked_word: str, candidates: List[str], guessed_set: set) -> collections.Counter:
+    """Score letters using improved n-gram model with:
+    1. Dictionary filtering (already done via candidates)
+    2. Position-aware n-grams
+    3. Adaptive interpolation
+    4. Distance weighting
+    """
+    letter_scores = collections.defaultdict(float)
+    masked_positions = [i for i, c in enumerate(masked_word) if c == "_"]
 
     if not masked_positions or not candidates:
-        return letter_scores
+        return collections.Counter()
 
-    # For each masked position, look at context (before and after)
+    # Build position-aware n-grams from filtered candidates
+    unigrams, bigrams, trigrams, fourgrams = _build_position_aware_ngrams(candidates, max_n=4)
+
+    # For each masked position, calculate scores using multiple n-gram levels
     for pos in masked_positions:
-        position_scores = collections.Counter()
+        position_scores = collections.defaultdict(float)
+        ngram_weights = []  # Adaptive weights based on data availability
 
-        # Get context: 1 letter before and 1 letter after
-        before = masked_word[pos - 1] if pos > 0 else None
-        after = masked_word[pos + 1] if pos < len(masked_word) - 1 else None
+        # Try 4-gram (highest order)
+        fourgram_score = _score_fourgram(pos, masked_word, fourgrams, guessed_set)
+        if fourgram_score:
+            for letter, score in fourgram_score.items():
+                position_scores[letter] += score * 0.40  # 40% weight
+                ngram_weights.append(0.40)
 
-        # Count letters that appear in candidates at this position with this context
-        for word in candidates:
-            if pos >= len(word):
-                continue
+        # Try trigram
+        trigram_score = _score_trigram(pos, masked_word, trigrams, guessed_set)
+        if trigram_score:
+            for letter, score in trigram_score.items():
+                position_scores[letter] += score * 0.30  # 30% weight
+                ngram_weights.append(0.30)
 
-            letter = word[pos]
+        # Try bigram
+        bigram_score = _score_bigram(pos, masked_word, bigrams, guessed_set)
+        if bigram_score:
+            for letter, score in bigram_score.items():
+                position_scores[letter] += score * 0.20  # 20% weight
+                ngram_weights.append(0.20)
 
-            # Check if context matches (bigram scoring)
-            context_match = True
+        # Unigram fallback
+        unigram_score = _score_unigram(pos, unigrams, guessed_set)
+        if unigram_score:
+            for letter, score in unigram_score.items():
+                position_scores[letter] += score * 0.10  # 10% weight
+                ngram_weights.append(0.10)
 
-            if before is not None and before != "_":
-                # Before context must match
-                if pos == 0 or word[pos - 1] != before:
-                    context_match = False
+        # Distance weighting: positions farther from revealed letters get lower weight
+        distance_weight = _calculate_distance_weight(pos, masked_word)
 
-            if after is not None and after != "_":
-                # After context must match
-                if pos >= len(word) - 1 or word[pos + 1] != after:
-                    context_match = False
+        # Aggregate scores with distance weighting
+        for letter, score in position_scores.items():
+            letter_scores[letter] += score * distance_weight
 
-            if context_match:
-                # Weight by how specific the context is
-                # More context = higher confidence
-                specificity = 1.0
-                if before is not None and before != "_":
-                    specificity += 1.0  # Bigram bonus
-                if after is not None and after != "_":
-                    specificity += 1.0  # Bigram bonus
+    return collections.Counter(letter_scores)
 
-                position_scores[letter] += specificity
 
-        # Aggregate scores from this position
-        letter_scores.update(position_scores)
+def _score_fourgram(pos: int, masked_word: str, fourgrams: dict, guessed_set: set) -> dict:
+    """Score letters at position using 4-gram context."""
+    scores = {}
 
-    return letter_scores
+    # Check all 4-gram patterns: ___X, __X_, _X__, X___
+    for offset in range(4):
+        start = pos - offset
+        if start < 0 or start + 3 >= len(masked_word):
+            continue
+
+        pattern = masked_word[start:start+4]
+        blank_pos = offset  # Position of blank within 4-gram
+
+        # Check if pattern has exactly one blank at our position
+        if pattern.count('_') != 1 or pattern[blank_pos] != '_':
+            continue
+
+        # Look up in fourgram model
+        if start in fourgrams:
+            for letter in string.ascii_lowercase:
+                if letter in guessed_set:
+                    continue
+
+                # Build full 4-gram with this letter
+                full_pattern = list(pattern)
+                full_pattern[blank_pos] = letter
+
+                # Lookup count
+                count = _lookup_fourgram(fourgrams[start], full_pattern)
+                if count > 0:
+                    scores[letter] = scores.get(letter, 0) + count
+
+    # Normalize
+    total = sum(scores.values())
+    if total > 0:
+        scores = {k: v / total for k, v in scores.items()}
+
+    return scores
+
+
+def _lookup_fourgram(ngram_dict: dict, pattern: list) -> int:
+    """Helper to lookup 4-gram count."""
+    try:
+        return ngram_dict[pattern[0]][pattern[1]][pattern[2]][pattern[3]]
+    except (KeyError, TypeError):
+        return 0
+
+
+def _score_trigram(pos: int, masked_word: str, trigrams: dict, guessed_set: set) -> dict:
+    """Score letters at position using trigram context."""
+    scores = {}
+
+    # Check trigram patterns: __X, _X_, X__
+    for offset in range(3):
+        start = pos - offset
+        if start < 0 or start + 2 >= len(masked_word):
+            continue
+
+        pattern = masked_word[start:start+3]
+        blank_pos = offset
+
+        if pattern.count('_') != 1 or pattern[blank_pos] != '_':
+            continue
+
+        if start in trigrams:
+            for letter in string.ascii_lowercase:
+                if letter in guessed_set:
+                    continue
+
+                full_pattern = list(pattern)
+                full_pattern[blank_pos] = letter
+
+                try:
+                    count = trigrams[start][full_pattern[0]][full_pattern[1]][full_pattern[2]]
+                    if count > 0:
+                        scores[letter] = scores.get(letter, 0) + count
+                except (KeyError, TypeError):
+                    pass
+
+    total = sum(scores.values())
+    if total > 0:
+        scores = {k: v / total for k, v in scores.items()}
+
+    return scores
+
+
+def _score_bigram(pos: int, masked_word: str, bigrams: dict, guessed_set: set) -> dict:
+    """Score letters at position using bigram context."""
+    scores = {}
+
+    # Check bigram patterns: _X, X_
+    for offset in range(2):
+        start = pos - offset
+        if start < 0 or start + 1 >= len(masked_word):
+            continue
+
+        pattern = masked_word[start:start+2]
+        blank_pos = offset
+
+        if pattern.count('_') != 1 or pattern[blank_pos] != '_':
+            continue
+
+        if start in bigrams:
+            for letter in string.ascii_lowercase:
+                if letter in guessed_set:
+                    continue
+
+                full_pattern = list(pattern)
+                full_pattern[blank_pos] = letter
+
+                try:
+                    count = bigrams[start][full_pattern[0]][full_pattern[1]]
+                    if count > 0:
+                        scores[letter] = scores.get(letter, 0) + count
+                except (KeyError, TypeError):
+                    pass
+
+    total = sum(scores.values())
+    if total > 0:
+        scores = {k: v / total for k, v in scores.items()}
+
+    return scores
+
+
+def _score_unigram(pos: int, unigrams: dict, guessed_set: set) -> dict:
+    """Score letters at position using unigram (position-specific frequency)."""
+    scores = {}
+
+    if pos in unigrams:
+        for letter in string.ascii_lowercase:
+            if letter not in guessed_set and letter in unigrams[pos]:
+                scores[letter] = unigrams[pos][letter]
+
+    total = sum(scores.values())
+    if total > 0:
+        scores = {k: v / total for k, v in scores.items()}
+
+    return scores
+
+
+def _calculate_distance_weight(pos: int, masked_word: str) -> float:
+    """Calculate distance weight based on proximity to revealed letters.
+
+    Positions closer to revealed letters get higher weight.
+    """
+    # Find nearest revealed letter
+    min_distance = len(masked_word)
+
+    for i, char in enumerate(masked_word):
+        if char != '_':
+            distance = abs(pos - i)
+            min_distance = min(min_distance, distance)
+
+    # Weight decreases with distance
+    # Distance 0 = 1.0, Distance 1 = 0.75, Distance 2 = 0.60, etc.
+    if min_distance == 0:
+        return 1.0
+
+    return 1.0 / (1.0 + min_distance * 0.5)
+
+
+def _ngram_counter(masked_word: str, candidates: List[str]) -> collections.Counter:
+    """Improved n-gram counter with position-awareness and adaptive interpolation.
+
+    Key improvements over basic n-gram:
+    1. Dictionary filtering (via candidates)
+    2. Position-aware n-grams
+    3. Adaptive interpolation (4-gram → trigram → bigram → unigram)
+    4. Distance weighting
+    """
+    guessed_set = set()  # Will be filtered by _choose_letter anyway
+    return _score_with_ngrams(masked_word, candidates, guessed_set)
 
 
 def ngram_guess_strategy(masked_state: str, context: HangmanStrategyContext) -> str:
