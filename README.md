@@ -1,4 +1,5 @@
 # Hangman AI Solver - Position-wise Neural Approach
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17336653.svg)](https://doi.org/10.5281/zenodo.17336653)
 
 > **Trexquant Investment LP Interview Project**
 
@@ -38,6 +39,8 @@ This project implements a state-of-the-art Hangman solver for the Trexquant Inve
 - Handles a maximum of 6 incorrect guesses per game
 
 **Status:** ✅ **Completed & Submitted**
+
+**Citation:** The full project package is archived on Zenodo — DOI [10.5281/zenodo.17336653](https://doi.org/10.5281/zenodo.17336653).
 
 ---
 
