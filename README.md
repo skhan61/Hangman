@@ -824,10 +824,10 @@ For questions or feedback about this project, please refer to the project reposi
 
 ## 📄 License
 
-This project was developed as part of the Trexquant Investment LP technical interview process.
+This repository contains original code and documentation authored by Sayem Khan for the Trexquant interview challenge. The official Trexquant dataset is **not** distributed here, and no third-party proprietary assets are included.
 
-**Copyright:** Trexquant Investment LP. All Rights Reserved.
-**Redistribution:** Redistribution of this question without written consent from Trexquant is prohibited.
+**Copyright:** © 2025 Sayem Khan. All Rights Reserved.
+**Redistribution:** Do not redistribute the repository contents without written permission from Sayem Khan. Trexquant holds no copyright over the assets present in this repository.
 
 ---
 
