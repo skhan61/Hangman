@@ -816,15 +816,6 @@ This work builds upon our previous meta-reinforcement learning approach:
 
 ---
 
-## 🤝 Acknowledgments
-
-- **Trexquant Investment LP** for providing the challenge problem and API infrastructure
-- **PyTorch Lightning** team for excellent training framework
-- **BERT** paper (Devlin et al., 2018) for masked language modeling inspiration
-- Original baseline implementation provided by Trexquant
-
----
-
 ## 📞 Contact
 
 For questions or feedback about this project, please refer to the project repository or the comprehensive technical report in [report/hangman_project_report.pdf](report/hangman_project_report.pdf).
