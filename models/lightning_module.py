@@ -71,6 +71,7 @@ class HangmanLightningModule(LightningModule):
             loss.detach().cpu(),
         )
 
+        # redundant
         with torch.no_grad():
             preds = logits.argmax(dim=-1)
             targets = labels.argmax(dim=-1)
