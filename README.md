@@ -19,6 +19,7 @@ A neural network-based Hangman solver using **position-wise character prediction
 - ✅ **Contextual Baseline**: 17.0% win rate, 0.4 avg tries remaining
 - ✅ **Model Checkpointing**: Best models saved based on Hangman win rate
 - ✅ **Fast Data Loading**: Optimized for batch size 1024-4096 with prefetching
+- ✅ **Trequation API**: 6% win rate recorded in latest evaluation
 
 ### Latest Evaluation (1000-word sample)
 - Compared three strategies on 1000 shuffled words from `data/test_unique.txt`
