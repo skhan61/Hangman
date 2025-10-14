@@ -46,7 +46,12 @@ class HangmanBiLSTM(BaseArchitecture):
 
         self.output = nn.Linear(config.hidden_dim * 2, config.vocab_size)
 
-    def forward(self, inputs: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        lengths: torch.Tensor,
+        return_embeddings: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         logger.debug(
             "Forward called with inputs shape=%s, lengths shape=%s",
             tuple(inputs.shape),
@@ -59,7 +64,7 @@ class HangmanBiLSTM(BaseArchitecture):
         packed = pack_padded_sequence(
             embed, lengths.cpu(), batch_first=True, enforce_sorted=False
         )
-        packed_output, _ = self.lstm(packed)
+        packed_output, (h_n, c_n) = self.lstm(packed)
         lstm_output, _ = pad_packed_sequence(
             packed_output, batch_first=True, total_length=inputs.size(1)
         )
@@ -67,4 +72,15 @@ class HangmanBiLSTM(BaseArchitecture):
         logits = self.output(self.dropout(lstm_output))
 
         logger.debug("Logits shape=%s", tuple(logits.shape))
+
+        if return_embeddings:
+            # Extract final hidden states from both directions
+            # h_n shape: [num_layers * 2, batch_size, hidden_dim]
+            # We want the last layer's forward and backward states
+            forward_hidden = h_n[-2]  # [batch_size, hidden_dim]
+            backward_hidden = h_n[-1]  # [batch_size, hidden_dim]
+            embeddings = torch.cat([forward_hidden, backward_hidden], dim=-1)  # [batch_size, hidden_dim * 2]
+            logger.debug("Embeddings shape=%s", tuple(embeddings.shape))
+            return logits, embeddings
+
         return logits

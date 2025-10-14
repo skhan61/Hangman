@@ -32,8 +32,23 @@ class BaseArchitecture(nn.Module, ABC):
         self.config = config
 
     @abstractmethod
-    def forward(self, inputs: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
-        """Forward pass returning per-position logits."""
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        lengths: torch.Tensor,
+        return_embeddings: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass returning per-position logits.
+
+        Args:
+            inputs: Input tensor of shape [batch_size, seq_len]
+            lengths: Length tensor of shape [batch_size]
+            return_embeddings: If True, return (logits, embeddings) tuple
+
+        Returns:
+            If return_embeddings=False: logits of shape [batch_size, seq_len, vocab_size]
+            If return_embeddings=True: (logits, embeddings) where embeddings is [batch_size, hidden_dim]
+        """
 
     def get_num_parameters(self, only_trainable: bool = True) -> int:
         """Return number of model parameters."""

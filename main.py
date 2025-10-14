@@ -49,6 +49,7 @@ from models import (
 #     read_words_list,
 # )
 from hangman_callback.callback import CustomHangmanEvalCallback
+from hangman_callback.telegram_notification import TelegramNotificationCallback
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +241,23 @@ def parse_args() -> argparse.Namespace:
         default=4,
         help="Number of batches to prefetch per worker (higher = faster but more memory).",
     )
+    parser.add_argument(
+        "--use-contrastive",
+        action="store_true",
+        help="Enable contrastive self-supervised learning with dual forward passes.",
+    )
+    parser.add_argument(
+        "--lambda-contrast",
+        type=float,
+        default=0.1,
+        help="Weight for contrastive loss component (default: 0.1).",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.07,
+        help="Temperature parameter for NTXent contrastive loss (default: 0.07).",
+    )
 
     return parser.parse_args()
 
@@ -429,6 +447,9 @@ def main() -> None:
         TrainingModuleConfig(
             learning_rate=args.learning_rate,
             weight_decay=args.weight_decay,
+            use_contrastive=args.use_contrastive,
+            lambda_contrast=args.lambda_contrast,
+            temperature=args.temperature,
         ),
     )
 
@@ -473,7 +494,13 @@ def main() -> None:
         "num_sanity_val_steps": 0,  # Skip validation sanity checks
     }
 
-    callbacks = [evaluation_callback, checkpoint_callback]
+    # Add Telegram notification callback
+    telegram_callback = TelegramNotificationCallback(
+        send_on_epoch_end=True,
+        send_on_train_end=True,
+    )
+
+    callbacks = [evaluation_callback, checkpoint_callback, telegram_callback]
     logger.info("Best model checkpoint will be saved to: %s", args.checkpoint_dir)
 
     trainer = Trainer(**trainer_kwargs, callbacks=callbacks)
