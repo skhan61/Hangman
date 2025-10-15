@@ -76,7 +76,7 @@ class TelegramNotificationCallback(Callback):
         if not self.send_on_epoch_end:
             return
 
-        epoch = trainer.current_epoch + 1
+        epoch = trainer.current_epoch
 
         # Get metrics
         metrics = trainer.callback_metrics
@@ -109,7 +109,7 @@ class TelegramNotificationCallback(Callback):
         if not self.send_on_train_end:
             return
 
-        total_epochs = trainer.current_epoch + 1
+        total_epochs = trainer.current_epoch
 
         msg = f"🎉 *Training Complete!*\n\n"
         msg += f"✅ Completed {total_epochs} epochs\n"

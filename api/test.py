@@ -123,59 +123,59 @@ def main(argv: Iterable[str] | None = None) -> None:
         log.warning("No words available to test")
         return
 
-    log.info("Using guess strategy: %s", frequency_guess_strategy.__name__)
-    api = HangmanOfflineAPI(
-        strategy=frequency_guess_strategy
-    )  # bert_style_guess_strategy
+    # log.info("Using guess strategy: %s", frequency_guess_strategy.__name__)
+    # api = HangmanOfflineAPI(
+    #     strategy=frequency_guess_strategy
+    # )  # bert_style_guess_strategy
 
-    sample_word = words[0]
-    win, attempts_remaining, progress = api.play_a_game_with_a_word(sample_word)
-    log.info(
-        "Single word test -> word='%s', win=%s, attempts_remaining=%s",
-        sample_word,
-        win,
-        attempts_remaining,
-    )
-    log.debug("Game progress: %s", progress)
+    # sample_word = words[0]
+    # win, attempts_remaining, progress = api.play_a_game_with_a_word(sample_word)
+    # log.info(
+    #     "Single word test -> word='%s', win=%s, attempts_remaining=%s",
+    #     sample_word,
+    #     win,
+    #     attempts_remaining,
+    # )
+    # log.debug("Game progress: %s", progress)
 
-    summary = api.simulate_games_for_word_list(
-        words, parallel=args.parallel, max_workers=args.max_workers
-    )
-    log.info("Aggregate results: overall=%s", summary["overall"])
-    for length, stats in sorted(summary["results_by_length"].items()):
-        log.debug("length=%s stats=%s", length, stats)
+    # summary = api.simulate_games_for_word_list(
+    #     words, parallel=args.parallel, max_workers=args.max_workers
+    # )
+    # log.info("Aggregate results: overall=%s", summary["overall"])
+    # for length, stats in sorted(summary["results_by_length"].items()):
+    #     log.debug("length=%s stats=%s", length, stats)
 
-    # Test all heuristic strategies
-    heuristic_strategies = [
-        ("Positional Frequency", positional_frequency_strategy),
-        ("N-gram", ngram_guess_strategy),
-        ("Pattern Matching", pattern_matching_strategy),
-        ("Entropy", entropy_strategy),
-        ("Vowel-Consonant", vowel_consonant_strategy),
-        ("Length-Aware", length_aware_strategy),
-        ("Suffix-Prefix", suffix_prefix_strategy),
-        ("Ensemble", ensemble_strategy),
-    ]
+    # # Test all heuristic strategies
+    # heuristic_strategies = [
+    #     ("Positional Frequency", positional_frequency_strategy),
+    #     ("N-gram", ngram_guess_strategy),
+    #     ("Pattern Matching", pattern_matching_strategy),
+    #     ("Entropy", entropy_strategy),
+    #     ("Vowel-Consonant", vowel_consonant_strategy),
+    #     ("Length-Aware", length_aware_strategy),
+    #     ("Suffix-Prefix", suffix_prefix_strategy),
+    #     ("Ensemble", ensemble_strategy),
+    # ]
 
-    heuristic_results = {"Frequency": summary}
+    # heuristic_results = {"Frequency": summary}
 
-    for strategy_name, strategy_func in heuristic_strategies:
-        log.info("\n" + "=" * 60)
-        log.info("Testing %s Strategy", strategy_name)
-        log.info("=" * 60)
+    # for strategy_name, strategy_func in heuristic_strategies:
+    #     log.info("\n" + "=" * 60)
+    #     log.info("Testing %s Strategy", strategy_name)
+    #     log.info("=" * 60)
 
-        api_strategy = HangmanOfflineAPI(strategy=strategy_func)
-        log.info("Running %s strategy...", strategy_name)
+    #     api_strategy = HangmanOfflineAPI(strategy=strategy_func)
+    #     log.info("Running %s strategy...", strategy_name)
 
-        summary_strategy = api_strategy.simulate_games_for_word_list(
-            words, parallel=args.parallel, max_workers=args.max_workers
-        )
-        log.info(
-            "%s strategy results: overall=%s",
-            strategy_name,
-            summary_strategy["overall"],
-        )
-        heuristic_results[strategy_name] = summary_strategy
+    #     summary_strategy = api_strategy.simulate_games_for_word_list(
+    #         words, parallel=args.parallel, max_workers=args.max_workers
+    #     )
+    #     log.info(
+    #         "%s strategy results: overall=%s",
+    #         strategy_name,
+    #         summary_strategy["overall"],
+    #     )
+    #     heuristic_results[strategy_name] = summary_strategy
 
     # Test neural strategy with checkpoint
     log.info("\n" + "=" * 60)
@@ -255,97 +255,100 @@ def main(argv: Iterable[str] | None = None) -> None:
         )
         log.info("Neural strategy results: overall=%s", summary_neural["overall"])
 
-        # Test neural + info gain strategy
+        # # Test neural + info gain strategy
+        # log.info("\n" + "=" * 60)
+        # log.info("Testing Neural + Information Gain Strategy")
+        # log.info("=" * 60)
+
+        # strategy_info = partial(
+        #     neural_info_gain_strategy,
+        #     model=lightning_module.model,
+        #     info_gain_weight=2.0,
+        # )
+        # api_neural_info = HangmanOfflineAPI(strategy=strategy_info)
+
+        # log.info("Testing with neural + info gain strategy...")
+        # summary_neural_info = api_neural_info.simulate_games_for_word_list(
+        #     words,
+        #     parallel=False,  # Neural strategy doesn't support parallel
+        #     max_workers=None,
+        # )
+        # log.info(
+        #     "Neural + InfoGain strategy results: overall=%s",
+        #     summary_neural_info["overall"],
+        # )
+
+        # # Compare all results
+        # log.info("\n" + "=" * 60)
+        # log.info("COMPARISON - ALL STRATEGIES")
+        # log.info("=" * 60)
+
+        # # Print all heuristic strategies
+        # for name in [
+        #     "Frequency",
+        #     "Positional Frequency",
+        #     "N-gram",
+        #     "Pattern Matching",
+        #     "Entropy",
+        #     "Vowel-Consonant",
+        #     "Length-Aware",
+        #     "Suffix-Prefix",
+        #     "Ensemble",
+        # ]:
+        #     if name in heuristic_results:
+        #         log.info(
+        #             "%-25s - Win Rate: %.2f%%, Avg Tries: %.2f",
+        #             name,
+        #             heuristic_results[name]["overall"]["win_rate"] * 100,
+        #             heuristic_results[name]["overall"]["average_tries_remaining"],
+        #         )
+
+        # Print neural strategies results
         log.info("\n" + "=" * 60)
-        log.info("Testing Neural + Information Gain Strategy")
+        log.info("NEURAL STRATEGY RESULTS")
         log.info("=" * 60)
-
-        strategy_info = partial(
-            neural_info_gain_strategy,
-            model=lightning_module.model,
-            info_gain_weight=2.0,
-        )
-        api_neural_info = HangmanOfflineAPI(strategy=strategy_info)
-
-        log.info("Testing with neural + info gain strategy...")
-        summary_neural_info = api_neural_info.simulate_games_for_word_list(
-            words,
-            parallel=False,  # Neural strategy doesn't support parallel
-            max_workers=None,
-        )
-        log.info(
-            "Neural + InfoGain strategy results: overall=%s",
-            summary_neural_info["overall"],
-        )
-
-        # Compare all results
-        log.info("\n" + "=" * 60)
-        log.info("COMPARISON - ALL STRATEGIES")
-        log.info("=" * 60)
-
-        # Print all heuristic strategies
-        for name in [
-            "Frequency",
-            "Positional Frequency",
-            "N-gram",
-            "Pattern Matching",
-            "Entropy",
-            "Vowel-Consonant",
-            "Length-Aware",
-            "Suffix-Prefix",
-            "Ensemble",
-        ]:
-            if name in heuristic_results:
-                log.info(
-                    "%-25s - Win Rate: %.2f%%, Avg Tries: %.2f",
-                    name,
-                    heuristic_results[name]["overall"]["win_rate"] * 100,
-                    heuristic_results[name]["overall"]["average_tries_remaining"],
-                )
-
-        # Print neural strategies
         log.info(
             "%-25s - Win Rate: %.2f%%, Avg Tries: %.2f",
             "Neural",
             summary_neural["overall"]["win_rate"] * 100,
             summary_neural["overall"]["average_tries_remaining"],
         )
-        log.info(
-            "%-25s - Win Rate: %.2f%%, Avg Tries: %.2f",
-            "Neural + InfoGain",
-            summary_neural_info["overall"]["win_rate"] * 100,
-            summary_neural_info["overall"]["average_tries_remaining"],
-        )
+        # log.info(
+        #     "%-25s - Win Rate: %.2f%%, Avg Tries: %.2f",
+        #     "Neural + InfoGain",
+        #     summary_neural_info["overall"]["win_rate"] * 100,
+        #     summary_neural_info["overall"]["average_tries_remaining"],
+        # )
         log.info("=" * 60)
     else:
         log.warning(
             "No checkpoint found in %s. Skipping neural strategy test.", checkpoint_dir
         )
 
-        # Still show comparison of heuristic strategies
-        log.info("\n" + "=" * 60)
-        log.info("COMPARISON - Heuristic Strategies")
-        log.info("=" * 60)
+        # # Still show comparison of heuristic strategies
+        # log.info("\n" + "=" * 60)
+        # log.info("COMPARISON - Heuristic Strategies")
+        # log.info("=" * 60)
 
-        for name in [
-            "Frequency",
-            "Positional Frequency",
-            "N-gram",
-            "Pattern Matching",
-            "Entropy",
-            "Vowel-Consonant",
-            "Length-Aware",
-            "Suffix-Prefix",
-            "Ensemble",
-        ]:
-            if name in heuristic_results:
-                log.info(
-                    "%-25s - Win Rate: %.2f%%, Avg Tries: %.2f",
-                    name,
-                    heuristic_results[name]["overall"]["win_rate"] * 100,
-                    heuristic_results[name]["overall"]["average_tries_remaining"],
-                )
-        log.info("=" * 60)
+        # for name in [
+        #     "Frequency",
+        #     "Positional Frequency",
+        #     "N-gram",
+        #     "Pattern Matching",
+        #     "Entropy",
+        #     "Vowel-Consonant",
+        #     "Length-Aware",
+        #     "Suffix-Prefix",
+        #     "Ensemble",
+        # ]:
+        #     if name in heuristic_results:
+        #         log.info(
+        #             "%-25s - Win Rate: %.2f%%, Avg Tries: %.2f",
+        #             name,
+        #             heuristic_results[name]["overall"]["win_rate"] * 100,
+        #             heuristic_results[name]["overall"]["average_tries_remaining"],
+        #         )
+        # log.info("=" * 60)
 
     log.info("Done")
 

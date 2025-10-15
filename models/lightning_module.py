@@ -26,6 +26,11 @@ class TrainingModuleConfig:
     use_contrastive: bool = False
     lambda_contrast: float = 0.1
     temperature: float = 0.07
+    # Regularization parameters
+    embedding_regularizer: Optional[str] = None  # Options: 'lp', 'center_invariant', 'zero_mean'
+    regularizer_weight: float = 1.0
+    # Multi-layer embedding parameters
+    num_embedding_layers: int = 1  # Number of final LSTM layers to use for embeddings (1-4)
 
 
 class HangmanLightningModule(LightningModule):
@@ -45,12 +50,51 @@ class HangmanLightningModule(LightningModule):
         if self.training_config.use_contrastive:
             from pytorch_metric_learning.losses import NTXentLoss, SelfSupervisedLoss
 
-            base_loss = NTXentLoss(temperature=self.training_config.temperature)
+            # Initialize regularizer if specified
+            regularizer = None
+            if self.training_config.embedding_regularizer:
+                from pytorch_metric_learning import regularizers
+
+                reg_type = self.training_config.embedding_regularizer.lower()
+                if reg_type == 'lp':
+                    regularizer = regularizers.LpRegularizer()
+                    logger.info("Using LpRegularizer (L2) with weight=%.3f",
+                               self.training_config.regularizer_weight)
+                elif reg_type == 'center_invariant':
+                    regularizer = regularizers.CenterInvariantRegularizer()
+                    logger.info("Using CenterInvariantRegularizer with weight=%.3f",
+                               self.training_config.regularizer_weight)
+                elif reg_type == 'zero_mean':
+                    regularizer = regularizers.ZeroMeanRegularizer()
+                    logger.info("Using ZeroMeanRegularizer with weight=%.3f",
+                               self.training_config.regularizer_weight)
+                else:
+                    logger.warning(
+                        "Unknown regularizer type '%s'. Options: 'lp', 'center_invariant', 'zero_mean'",
+                        reg_type
+                    )
+
+            # Create base loss with optional regularizer
+            base_loss = NTXentLoss(
+                temperature=self.training_config.temperature,
+                embedding_regularizer=regularizer,
+                embedding_reg_weight=self.training_config.regularizer_weight if regularizer else 0.0
+            )
             self.contrastive_loss_fn = SelfSupervisedLoss(base_loss)
+
+            # Log configuration
+            hidden_dim = getattr(model.config, 'hidden_dim', 256)
+            num_layers = self.training_config.num_embedding_layers
+            embedding_size = hidden_dim * 2 * num_layers
             logger.info(
                 "Contrastive learning enabled with lambda=%.3f, temperature=%.3f",
                 self.training_config.lambda_contrast,
                 self.training_config.temperature,
+            )
+            logger.info(
+                "Using %d LSTM layer(s) for embeddings (embedding_size=%d)",
+                num_layers,
+                embedding_size
             )
         else:
             self.contrastive_loss_fn = None
@@ -61,6 +105,13 @@ class HangmanLightningModule(LightningModule):
         lengths: torch.Tensor,
         return_embeddings: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        if return_embeddings and hasattr(self.model, 'forward') and 'num_embedding_layers' in self.model.forward.__code__.co_varnames:
+            return self.model(
+                inputs,
+                lengths,
+                return_embeddings=return_embeddings,
+                num_embedding_layers=self.training_config.num_embedding_layers
+            )
         return self.model(inputs, lengths, return_embeddings=return_embeddings)
 
     def _compute_supervised_loss(

@@ -258,6 +258,26 @@ def parse_args() -> argparse.Namespace:
         default=0.07,
         help="Temperature parameter for NTXent contrastive loss (default: 0.07).",
     )
+    parser.add_argument(
+        "--embedding-regularizer",
+        type=str,
+        default=None,
+        choices=['lp', 'center_invariant', 'zero_mean'],
+        help="Embedding regularizer for contrastive loss. Options: lp (L2), center_invariant, zero_mean.",
+    )
+    parser.add_argument(
+        "--regularizer-weight",
+        type=float,
+        default=1.0,
+        help="Weight for embedding regularizer (default: 1.0).",
+    )
+    parser.add_argument(
+        "--num-embedding-layers",
+        type=int,
+        default=1,
+        choices=[1, 2, 3, 4],
+        help="Number of top LSTM layers to use for contrastive embeddings (1-4, default: 1).",
+    )
 
     return parser.parse_args()
 
@@ -450,6 +470,9 @@ def main() -> None:
             use_contrastive=args.use_contrastive,
             lambda_contrast=args.lambda_contrast,
             temperature=args.temperature,
+            embedding_regularizer=args.embedding_regularizer,
+            regularizer_weight=args.regularizer_weight,
+            num_embedding_layers=args.num_embedding_layers,
         ),
     )
 
