@@ -324,6 +324,233 @@ Custom Lightning callback for Hangman-specific evaluation:
     \item Location: \texttt{logs/checkpoints/}
 \end{itemize}
 
+\section{Self-Supervised Learning Extensions}
+
+Beyond the standard supervised learning approach, we explored several extensions to improve representation learning and model generalization. These experiments leverage self-supervised contrastive learning, embedding regularization, and hierarchical feature extraction from multiple LSTM layers.
+
+\subsection{Self-Supervised Contrastive Learning}
+
+Inspired by recent advances in self-supervised representation learning~\cite{gao2021simcse}, we augmented the supervised loss with a contrastive learning objective. This approach encourages the model to learn robust embeddings that cluster similar game states while separating dissimilar ones.
+
+\subsubsection{Dual-View Augmentation}
+
+Unlike vision tasks where data augmentation through transformations (rotation, cropping) is straightforward, text-based games like Hangman require alternative augmentation strategies. We employ \textbf{dropout-based augmentation}:
+
+\begin{itemize}
+    \item Generate two views of the same input by performing two forward passes
+    \item Each pass uses different dropout masks (dropout probability = 0.3)
+    \item The stochastic nature of dropout creates distinct representations
+    \item These serve as positive pairs for contrastive learning
+\end{itemize}
+
+\subsubsection{Contrastive Loss Function}
+
+We use the NT-Xent (Normalized Temperature-scaled Cross-Entropy) loss~\cite{gao2021simcse} from PyTorch Metric Learning, wrapped in a \texttt{SelfSupervisedLoss} module:
+
+\begin{equation}
+\mathcal{L}_{\text{contrastive}} = -\log \frac{\exp(\text{sim}(\mathbf{z}_i, \mathbf{z}_j) / \tau)}{\sum_{k=1}^{2N} \mathbb{1}_{k \neq i} \exp(\text{sim}(\mathbf{z}_i, \mathbf{z}_k) / \tau)}
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $\mathbf{z}_i, \mathbf{z}_j$ are embeddings from the two views of the same input (positive pair)
+    \item $\text{sim}(\mathbf{u}, \mathbf{v}) = \mathbf{u}^T \mathbf{v} / (||\mathbf{u}|| \cdot ||\mathbf{v}||)$ is cosine similarity
+    \item $\tau$ is the temperature parameter (default: 0.07)
+    \item $N$ is the batch size
+\end{itemize}
+
+\subsubsection{Combined Loss}
+
+The total training loss combines supervised and contrastive objectives:
+
+\begin{equation}
+\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{sup}}^{(1)} + \mathcal{L}_{\text{sup}}^{(2)} + \lambda_{\text{contrast}} \cdot \mathcal{L}_{\text{contrastive}}
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $\mathcal{L}_{\text{sup}}^{(1)}, \mathcal{L}_{\text{sup}}^{(2)}$ are supervised losses from both views
+    \item $\lambda_{\text{contrast}}$ is the contrastive loss weight (default: 0.1)
+\end{itemize}
+
+\subsubsection{Embedding Extraction}
+
+For contrastive learning, we extract sentence-level embeddings from the BiLSTM's final hidden states:
+
+\begin{lstlisting}[language=Python, caption={Embedding Extraction for Contrastive Learning}]
+# Extract embeddings from BiLSTM hidden states
+# h_n shape: [num_layers * 2, batch_size, hidden_dim]
+
+# Get last layer's forward and backward hidden states
+forward_hidden = h_n[-2]   # [batch_size, hidden_dim]
+backward_hidden = h_n[-1]  # [batch_size, hidden_dim]
+
+# Concatenate for final embedding
+embeddings = torch.cat([forward_hidden, backward_hidden], dim=-1)
+# Shape: [batch_size, hidden_dim * 2] = [batch_size, 512]
+\end{lstlisting}
+
+\subsubsection{Training Configuration}
+
+Command-line flags for contrastive learning:
+\begin{itemize}
+    \item \texttt{--use-contrastive}: Enable contrastive learning
+    \item \texttt{--lambda-contrast}: Contrastive loss weight (default: 0.1)
+    \item \texttt{--temperature}: Temperature parameter for NT-Xent (default: 0.07)
+\end{itemize}
+
+\textbf{Example usage:}
+\begin{verbatim}
+python main.py --max-epochs 10 --batch-size 256 \
+  --use-contrastive --lambda-contrast 0.1 --temperature 0.07
+\end{verbatim}
+
+\subsection{Embedding Regularization}
+
+To prevent overfitting and improve generalization of learned embeddings, we integrated embedding regularizers from PyTorch Metric Learning. These regularizers are applied to the embeddings before the contrastive loss computation.
+
+\subsubsection{Supported Regularizers}
+
+\textbf{1. Lp Regularizer (L2 Norm Penalty)}
+
+Encourages embeddings to have small L2 norm:
+\begin{equation}
+\mathcal{R}_{\text{Lp}}(\mathbf{z}) = ||\mathbf{z}||_2^2
+\end{equation}
+
+This prevents embeddings from growing arbitrarily large and promotes numerical stability.
+
+\textbf{2. Center Invariant Regularizer}
+
+Encourages all embeddings to have similar L2 norms, inspired by the "Deep Face Recognition with Center Invariant Loss" paper. This ensures that the embedding space is uniformly distributed:
+\begin{equation}
+\mathcal{R}_{\text{center}}(\{\mathbf{z}_i\}) = \text{Var}(||\mathbf{z}_1||_2, ||\mathbf{z}_2||_2, \ldots, ||\mathbf{z}_N||_2)
+\end{equation}
+
+\textbf{3. Zero Mean Regularizer}
+
+Ensures embeddings have zero mean across the batch, inspired by "Signal-to-Noise Ratio: A Robust Distance Metric":
+\begin{equation}
+\mathcal{R}_{\text{zero}}(\{\mathbf{z}_i\}) = ||\frac{1}{N}\sum_{i=1}^N \mathbf{z}_i||_2^2
+\end{equation}
+
+\subsubsection{Integration with Loss Function}
+
+The regularization term is added to the base NT-Xent loss:
+\begin{equation}
+\mathcal{L}_{\text{NT-Xent+Reg}} = \mathcal{L}_{\text{NT-Xent}} + w_{\text{reg}} \cdot \mathcal{R}(\mathbf{z})
+\end{equation}
+
+where $w_{\text{reg}}$ is the regularizer weight (default: 1.0).
+
+\subsubsection{Configuration}
+
+Command-line flags:
+\begin{itemize}
+    \item \texttt{--embedding-regularizer}: Choose regularizer type (\texttt{lp}, \texttt{center\_invariant}, \texttt{zero\_mean})
+    \item \texttt{--regularizer-weight}: Regularization strength (default: 1.0)
+\end{itemize}
+
+\textbf{Example usage:}
+\begin{verbatim}
+python main.py --max-epochs 10 --batch-size 256 \
+  --use-contrastive --lambda-contrast 0.1 \
+  --embedding-regularizer lp --regularizer-weight 0.01
+\end{verbatim}
+
+\subsection{Multi-Layer Hierarchical Embeddings}
+
+Traditional approaches extract embeddings only from the final LSTM layer. However, different layers in a deep network capture different levels of abstraction. We extend our model to leverage embeddings from multiple LSTM layers simultaneously.
+
+\subsubsection{Hierarchical Representations}
+
+In a 4-layer BiLSTM, each layer learns progressively abstract features:
+\begin{itemize}
+    \item \textbf{Layer 1 (bottom)}: Character-level patterns, bigrams, common prefixes/suffixes
+    \item \textbf{Layer 2}: Syllable patterns, morphological features
+    \item \textbf{Layer 3}: Word-level patterns, semantic groupings
+    \item \textbf{Layer 4 (top)}: High-level abstract representations, context integration
+\end{itemize}
+
+\subsubsection{Multi-Layer Embedding Extraction}
+
+Instead of using only the top layer, we concatenate hidden states from the top $K$ layers:
+
+\begin{lstlisting}[language=Python, caption={Multi-Layer Embedding Extraction}]
+# h_n shape: [num_layers * 2, batch_size, hidden_dim]
+# For 4-layer BiLSTM: 8 elements (4 forward + 4 backward)
+
+num_layers_to_use = 2  # Use top 2 layers
+layer_embeddings = []
+
+for layer_offset in range(num_layers_to_use):
+    # Get forward and backward for this layer (from top)
+    forward_idx = -(2 * num_layers_to_use) + (2 * layer_offset)
+    backward_idx = forward_idx + 1
+
+    forward_h = h_n[forward_idx]
+    backward_h = h_n[backward_idx]
+
+    # Concatenate forward and backward
+    layer_emb = torch.cat([forward_h, backward_h], dim=-1)
+    layer_embeddings.append(layer_emb)
+
+# Concatenate all layers
+embeddings = torch.cat(layer_embeddings, dim=-1)
+# Shape: [batch, num_layers * hidden_dim * 2]
+\end{lstlisting}
+
+\subsubsection{Embedding Dimension Scaling}
+
+Using $K$ layers increases embedding dimensionality:
+\begin{itemize}
+    \item 1 layer: 512-dim (256 × 2)
+    \item 2 layers: 1024-dim (512 × 2)
+    \item 3 layers: 1536-dim (768 × 2)
+    \item 4 layers: 2048-dim (1024 × 2)
+\end{itemize}
+
+\subsubsection{Benefits}
+
+\begin{enumerate}
+    \item \textbf{Richer Representations}: Access to multiple levels of abstraction
+    \item \textbf{Better Gradient Flow}: Contrastive loss gradients flow to intermediate layers
+    \item \textbf{Robustness}: Ensemble-like effect reduces reliance on any single layer
+    \item \textbf{Improved Performance}: Empirically, using 2-3 layers often outperforms single-layer embeddings
+\end{enumerate}
+
+\subsubsection{Configuration}
+
+Command-line flag:
+\begin{itemize}
+    \item \texttt{--num-embedding-layers}: Number of top LSTM layers to use (1-4, default: 1)
+\end{itemize}
+
+\textbf{Example usage:}
+\begin{verbatim}
+python main.py --max-epochs 10 --batch-size 256 \
+  --use-contrastive --lambda-contrast 0.1 \
+  --num-embedding-layers 2
+\end{verbatim}
+
+\subsection{Combined Configuration}
+
+All extensions can be combined for comprehensive self-supervised training:
+
+\begin{verbatim}
+python main.py --max-epochs 10 --batch-size 256 \
+  --use-contrastive --lambda-contrast 0.1 --temperature 0.07 \
+  --embedding-regularizer lp --regularizer-weight 0.01 \
+  --num-embedding-layers 3
+\end{verbatim}
+
+This configuration enables:
+\begin{itemize}
+    \item Self-supervised contrastive learning with dropout augmentation
+    \item L2 regularization on embeddings (weight = 0.01)
+    \item Hierarchical embeddings from top 3 LSTM layers (1536-dim)
+\end{itemize}
+
 \section{Guessing Strategies}
 
 Beyond the neural approach, we implemented multiple baseline strategies for comparison.
@@ -545,7 +772,42 @@ def set_seed(seed=42):
 
 \section{Future Work}
 
-Future work will explore two complementary directions. First, we plan to apply \textbf{self-supervised contrastive learning}~\cite{chen2020simclr,gao2021simcse} to Hangman by treating different masked views of the same word (e.g., ``\_pple'' and ``app\_e'') as positive pairs while contrasting them against different words. This SimCLR-inspired approach uses NT-Xent loss to learn word representations without trajectory labels, potentially improving generalization to rare patterns. Second, Hangman provides a natural testbed for \textbf{neurosymbolic AI}~\cite{garcez2019neurosymbolic}—the game requires both statistical pattern recognition (which neural networks handle well) and logical reasoning (e.g., ``Q almost always precedes U''). Unlike abstract reasoning benchmarks, Hangman offers clear rules, discrete states, and immediate feedback, making it ideal for studying whether models genuinely reason or merely memorize. We aim to develop hybrid architectures that integrate learned representations with symbolic constraints (phonotactic rules, morphological patterns) to achieve interpretable, high-performance decision-making.
+While we have successfully implemented self-supervised contrastive learning with dropout-based augmentation (Section 5), several promising directions remain for future exploration:
+
+\subsection{Advanced Contrastive Learning}
+
+\begin{itemize}
+    \item \textbf{Cross-Batch Memory}: Explore MoCo-style~\cite{chen2020simclr} momentum encoders with memory queues to form contrastive pairs across multiple batches, potentially improving representation learning with larger negative sample sets
+    \item \textbf{Hard Negative Mining}: Implement mining strategies to identify challenging negative pairs (e.g., words with similar patterns but different letters) for more effective contrastive learning
+    \item \textbf{Multi-View Augmentation}: Beyond dropout-based augmentation, explore alternative views such as different masking strategies or position-aware augmentation
+\end{itemize}
+
+\subsection{Model Architecture Enhancements}
+
+\begin{itemize}
+    \item \textbf{Attention Mechanisms}: Integrate cross-attention between position-wise predictions to capture inter-position dependencies more explicitly
+    \item \textbf{Mixture of Experts}: Use gating mechanisms to route different word patterns to specialized sub-networks
+    \item \textbf{Graph Neural Networks}: Model letter co-occurrence patterns as graphs to capture phonotactic constraints
+\end{itemize}
+
+\subsection{Neurosymbolic Integration}
+
+Hangman provides an ideal testbed for \textbf{neurosymbolic AI}~\cite{garcez2019neurosymbolic}—the game requires both statistical pattern recognition (which neural networks handle well) and logical reasoning (e.g., ``Q almost always precedes U''). Unlike abstract reasoning benchmarks, Hangman offers clear rules, discrete states, and immediate feedback, making it ideal for studying whether models genuinely reason or merely memorize. Future work could:
+
+\begin{itemize}
+    \item Integrate learned neural representations with symbolic constraints (phonotactic rules, morphological patterns)
+    \item Develop hybrid architectures combining neural prediction with rule-based post-processing
+    \item Implement differentiable logic modules that learn and apply linguistic rules
+    \item Achieve interpretable, explainable decision-making by exposing the reasoning process
+\end{itemize}
+
+\subsection{Training Efficiency}
+
+\begin{itemize}
+    \item \textbf{Curriculum Learning}: Start with simple words and progressively increase difficulty
+    \item \textbf{Active Learning}: Iteratively select the most informative game trajectories for training
+    \item \textbf{Knowledge Distillation}: Compress large models into smaller, faster variants for deployment
+\end{itemize}
 
 \section{Conclusion}
 
@@ -556,6 +818,7 @@ This project successfully developed a neural Hangman solver that achieves \textb
 \begin{enumerate}
     \item \textbf{Novel Framing}: Position-wise prediction inspired by masked language modeling
     \item \textbf{Multiple Architectures}: BiLSTM, Transformer, and BERT variants
+    \item \textbf{Self-Supervised Learning Extensions}: Contrastive learning with dropout augmentation, embedding regularization, and multi-layer hierarchical embeddings
     \item \textbf{Comprehensive Data Generation}: 13 masking strategies for diverse training
     \item \textbf{Production-Ready Implementation}: Optimized data loading, checkpointing, and API integration
     \item \textbf{Extensive Evaluation}: Multiple baseline strategies for rigorous comparison
