@@ -202,7 +202,16 @@ def parse_args() -> argparse.Namespace:
         "--model_arch",
         dest="model_arch",
         type=str,
-        choices=["bilstm", "bilstm_attention", "bilstm_multihead", "transformer", "bert", "charrnn", "gru", "mlp"],
+        choices=[
+            "bilstm",
+            "bilstm_attention",
+            "bilstm_multihead",
+            "transformer",
+            "bert",
+            "charrnn",
+            "gru",
+            "mlp",
+        ],
         default="bilstm",
         help="Model architecture to use for Hangman training.",
     )
@@ -262,7 +271,7 @@ def parse_args() -> argparse.Namespace:
         "--embedding-regularizer",
         type=str,
         default=None,
-        choices=['lp', 'center_invariant', 'zero_mean'],
+        choices=["lp", "center_invariant", "zero_mean"],
         help="Embedding regularizer for contrastive loss. Options: lp (L2), center_invariant, zero_mean.",
     )
     parser.add_argument(
@@ -361,7 +370,8 @@ def main() -> None:
     mask_shape = tuple(batch["label_mask"].shape)
     lengths_shape = tuple(batch["lengths"].shape)
     logger.debug(
-        f"First batch tensor shapes — inputs: {inputs_shape}, labels: {labels_shape}, label_mask: {mask_shape}, lengths: {lengths_shape}"
+        f"First batch tensor shapes — inputs: {inputs_shape}, labels: {labels_shape}, \
+            label_mask: {mask_shape}, lengths: {lengths_shape}"
     )
     logger.debug(
         (
@@ -488,7 +498,7 @@ def main() -> None:
         patience=args.patience if args.early_stopping else 0,
         min_delta=args.min_delta,
         mode=args.monitor_mode,
-        frequency=1, # args.test_eval_frequency,
+        frequency=1,  # args.test_eval_frequency,
     )
 
     # Setup model checkpoint callback to save BEST model based on hangman win rate
@@ -504,7 +514,7 @@ def main() -> None:
     )
 
     # Enable Tensor Cores for better performance on CUDA devices
-    torch.set_float32_matmul_precision('medium')
+    torch.set_float32_matmul_precision("medium")
     logger.info("Set float32 matmul precision to 'medium' for Tensor Cores")
 
     trainer_kwargs = {
@@ -541,10 +551,11 @@ def main() -> None:
     # eval_summary = evaluation_callback._run_evaluation(
     #     lightning_module.model,
     #     )
-    
+
     # logger.info("Win rate: %.2f", eval_summary["win_rate"])
     # logger.info("Average tries remaining: %.2f", \
     #             eval_summary["average_tries_remaining"])
+
 
 if __name__ == "__main__":
     main()

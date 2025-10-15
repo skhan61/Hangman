@@ -100,7 +100,9 @@ def parse_eval_words(value: str) -> int | None:
     return parsed
 
 
-def create_model(model_arch: str, vocab_size: int, mask_idx: int, pad_idx: int) -> torch.nn.Module:
+def create_model(
+    model_arch: str, vocab_size: int, mask_idx: int, pad_idx: int
+) -> torch.nn.Module:
     """Create a model instance based on architecture name.
 
     Args:
@@ -215,7 +217,9 @@ def train_model(
 
     # Count parameters
     trainable_params, total_params = count_parameters(model)
-    logger.info(f"  Parameters: {format_number(trainable_params)} trainable, {format_number(total_params)} total")
+    logger.info(
+        f"  Parameters: {format_number(trainable_params)} trainable, {format_number(total_params)} total"
+    )
 
     # Create lightning module
     lightning_module = HangmanLightningModule(
@@ -254,7 +258,7 @@ def train_model(
     )
 
     # Setup trainer
-    torch.set_float32_matmul_precision('medium')
+    torch.set_float32_matmul_precision("medium")
 
     trainer = Trainer(
         max_epochs=args.max_epochs,
@@ -279,7 +283,7 @@ def train_model(
         success = False
 
     # Get best metrics from callback
-    if success and hasattr(evaluation_callback, 'best_win_rate'):
+    if success and hasattr(evaluation_callback, "best_win_rate"):
         best_win_rate = evaluation_callback.best_win_rate
         best_epoch = evaluation_callback.best_epoch
     else:
@@ -371,7 +375,9 @@ def print_comparison_table(results: list[dict[str, Any]]) -> None:
         logger.info(row)
 
     logger.info("-" * 80)
-    logger.info(f"\nBest Model: {sorted_results[0]['model']} ({sorted_results[0]['win_rate']*100:.1f}%)")
+    logger.info(
+        f"\nBest Model: {sorted_results[0]['model']} ({sorted_results[0]['win_rate']*100:.1f}%)"
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -395,7 +401,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["bilstm", "bilstm_attention", "bilstm_multihead", "gru", "charrnn", "mlp"],
+        default=[
+            "bilstm",
+            "bilstm_attention",
+            "bilstm_multihead",
+            "gru",
+            "charrnn",
+            "mlp",
+        ],
         help="List of models to benchmark (default: all except bert/transformer)",
     )
     parser.add_argument(
@@ -471,9 +484,9 @@ def main() -> None:
         force=True,
     )
 
-    logger.info("="*60)
+    logger.info("=" * 60)
     logger.info("HANGMAN MODEL BENCHMARK")
-    logger.info("="*60)
+    logger.info("=" * 60)
     logger.info(f"Models to benchmark: {', '.join(args.models)}")
     logger.info(f"Epochs per model: {args.max_epochs}")
     logger.info(f"Batch size: {args.batch_size}")
@@ -542,17 +555,19 @@ def main() -> None:
             results.append(result)
         except Exception as e:
             logger.error(f"Failed to benchmark {model_arch}: {e}")
-            results.append({
-                "model": model_arch,
-                "win_rate": 0.0,
-                "trainable_params": 0,
-                "total_params": 0,
-                "training_time_sec": 0.0,
-                "epochs": args.max_epochs,
-                "best_epoch": 0,
-                "checkpoint_path": "N/A",
-                "success": False,
-            })
+            results.append(
+                {
+                    "model": model_arch,
+                    "win_rate": 0.0,
+                    "trainable_params": 0,
+                    "total_params": 0,
+                    "training_time_sec": 0.0,
+                    "epochs": args.max_epochs,
+                    "best_epoch": 0,
+                    "checkpoint_path": "N/A",
+                    "success": False,
+                }
+            )
 
     # Save and display results
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")

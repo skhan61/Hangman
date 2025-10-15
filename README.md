@@ -152,6 +152,57 @@ guess = pick_highest_unguessed(aggregated)     # 'a'
 
 ---
 
+## 🔬 Supervised vs Self-Supervised Training Comparison
+
+We explored two training approaches for the BiLSTM architecture to understand the impact of self-supervised learning with contrastive loss:
+
+### Experimental Setup
+
+Both runs used 10 epochs on the same dataset with different configurations:
+
+| Approach | Batch Size | Additional Components | Training Time/Epoch |
+|----------|------------|----------------------|---------------------|
+| **Supervised** | 4096 | Standard cross-entropy loss only | ~1.5 min |
+| **Self-Supervised** | 256 | + Contrastive loss (λ=0.1) + L2 regularizer (0.01) + 3-layer embeddings | ~7 min |
+
+### Results
+
+| Metric | Supervised | Self-Supervised | Improvement |
+|--------|-----------|-----------------|-------------|
+| **Final Win Rate** | 57.5% | **58.3%** | +0.8 pp |
+| **Best Win Rate** | 57.7% (epoch 7) | **58.3%** (epoch 9) | +0.6 pp |
+| **Avg Tries Remaining** | 1.82 | **1.94** | +0.12 |
+| **Training Speed** | ~1.5 min/epoch | ~7 min/epoch | 4.7× slower |
+| **Total Training Time** | ~15 min | ~72 min | 4.8× longer |
+
+### Key Findings
+
+1. **Marginal Performance Gain**: Self-supervised learning provides a modest +0.8 percentage point improvement (57.5% → 58.3%)
+
+2. **Training Trade-off**: The performance gain comes at a significant computational cost:
+   - 4.7× slower per epoch (smaller batch size + additional loss computations)
+   - 4.8× longer total training time (15 min vs 72 min for 10 epochs)
+
+3. **Better Generalization**: Self-supervised model shows slightly higher average tries remaining (1.94 vs 1.82), suggesting more confident predictions
+
+4. **Learning Dynamics**:
+   - Supervised: Peaks early (epoch 7), then plateaus
+   - Self-supervised: Continues improving through epoch 9
+
+### Recommendation
+
+For this Hangman task, **supervised learning with large batch sizes (4096)** offers the best efficiency-performance trade-off:
+- Achieves 57.5% win rate in just 15 minutes
+- Simpler architecture without contrastive learning complexity
+- Sufficient for production use (already 3.7× better than baseline)
+
+Self-supervised learning may be valuable for:
+- Tasks requiring maximum accuracy regardless of training time
+- Scenarios with limited labeled data
+- Transfer learning to related word games
+
+---
+
 ## 🏗️ Technical Architecture
 
 ### Supported Model Architectures
