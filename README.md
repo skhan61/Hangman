@@ -867,9 +867,49 @@ This work builds upon our previous meta-reinforcement learning approach:
 
 ---
 
+## 💭 Personal Note
+
+**On This Journey & What I Learned:**
+
+Trexquant never replied to my emails despite achieving a 67.2% win rate on their challenge—significantly beating their baseline and meeting the requirements. I contacted them several times following up on next steps. They never bothered to respond. But honestly, I don't really care anymore.
+
+**Why This Kind of Assessment Matters:**
+
+I genuinely enjoyed this type of assessment. It's a **real problem-solving challenge** that requires end-to-end thinking: from understanding the problem deeply, to designing the architecture, implementing the solution, training models, optimizing performance, and finally deploying it against a real API. This is what engineering looks like in the real world.
+
+This is infinitely better than:
+- **Nonsensical LeetCode problems** that test memorization of obscure algorithms you'll never use
+- **High school probability questions** disguised as "quant interviews" that just test whether you remember formulas from 15 years ago
+
+Don't get me wrong—I love probability and statistics. I studied EEE (Electrical and Electronic Engineering), and I understand the mathematical foundations. But there's a difference between applying mathematical thinking to solve real problems versus spending all day deriving the same textbook problems I solved in high school. The former excites me; the latter feels like a waste of time.
+
+**What Made This Project Valuable:**
+
+This Hangman challenge forced me to:
+1. **Design a novel approach** (position-wise neural prediction inspired by BERT)
+2. **Build infrastructure** (data pipelines, training loops, checkpointing, callbacks)
+3. **Optimize for performance** (DataLoader optimizations, mixed precision, batch tuning)
+4. **Experiment systematically** (13 masking strategies, multiple architectures, hyperparameter tuning)
+5. **Deploy and test** (real API integration, strategy comparison, production deployment)
+6. **Document thoroughly** (16-page technical report, comprehensive README)
+
+This is the kind of work that teaches you how to **build real systems**, not just pass interviews.
+
+**Moving Forward:**
+
+Now I'm busy coding my own automated quantitative trading strategy. In the era of large language models, when knowledge has become a commodity and everyone can query GPT for answers, the differentiator is not what you know—it's what you can **build, ship, and iterate on**.
+
+This project taught me that the journey of building something from scratch, debugging, optimizing, and seeing it work is far more valuable than any company's hiring decision. The skills I developed here—system design, ML engineering, software architecture, performance optimization—are transferable and lasting.
+
+**Key Takeaway:** The best outcomes come from the process itself, not from external validation. Build things. Ship them. Learn from them. Repeat. And beg money from friends to live.
+
+---
+
 ## 📞 Contact
 
-For questions or feedback about this project, please refer to the project repository or the comprehensive technical report in [report/hangman_project_report.pdf](report/hangman_project_report.pdf).
+**Email:** <sayem.eee.kuet@gmail.com>
+
+For questions or feedback about this project, feel free to reach out via email or refer to the comprehensive technical report in [report/hangman_project_report.pdf](report/hangman_project_report.pdf).
 
 ---
 

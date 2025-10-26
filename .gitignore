@@ -144,6 +144,9 @@ dmypy.json
 *.tar
 *.tar.gz
 
+# Media assets
+media/
+
 # Lightning-Hydra-Template
 configs/local/default.yaml
 /data/
